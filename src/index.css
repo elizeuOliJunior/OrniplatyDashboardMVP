@@ -1,0 +1,326 @@
+/* --- MANAGED FONT IMPORTS START (do not edit manually) --- */
+/* INTERNAL USE NAME: Heading */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+/* --- MANAGED FONT IMPORTS END --- */
+
+/* @import url() FONT IMPORTS MUST ALWAYS BE AT THE VERY TOP OF THIS FILE, ABOVE THE TAILWIND IMPORTS — DO NOT DELETE THIS COMMENT */
+
+/* CRITICAL: THE FOLLOWING TAILWIND IMPORTS MUST NEVER BE DELETED OR REORDERED — DO NOT DELETE THIS COMMENT */
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* END TAILWIND IMPORTS — ALL OTHER CSS MUST GO BELOW THIS LINE */
+
+:root {
+  --background: #F4F8F8;
+  --surface: #FFFFFF;
+  --surface-muted: #EAF2F1;
+  --border: #D7E7E5;
+  --border-strong: #B5D3CF;
+  --text-primary: #0B2B2A;
+  --text-secondary: #4B6866;
+  --text-muted: #587371;
+  --primary: #0E7490;
+  --primary-hover: #0B5F77;
+  --primary-soft: #E0F2F5;
+  --primary-foreground: #FFFFFF;
+  --sidebar-background: #042F2E;
+  --sidebar-active: #0E4B49;
+  --sidebar-text: #CFE7E4;
+  --logo-tile: #F2FAFA;
+  /* design system v2.6: hover único e item selecionado em lista */
+  --hover-surface: #F8FAFA;
+  --active-surface: #F1F5F5;
+  --success: #12A06E;
+  --success-background: #DDF7EC;
+  /* DS v3.18 (P8): verde para TEXTO pequeno. Mesmo nome e valor do DS. */
+  --success-text: #047857;
+  --badge-count: #34D399;
+  --badge-count-text: #042F2E;
+  --warning: #B45309;
+  --warning-background: #FEF3C7;
+  --warning-icon: #D97706;
+  --text-neutral: #3F5957;
+  --disabled-surface: #EEF3F3;
+  --disabled-text: #7F9694;
+  --error: #B91C1C;
+  --error-background: #FEE2E2;
+  --whatsapp-background: #ECE5DD;
+  --whatsapp-outgoing: #D9FDD3;
+  --facebook: #1877F2;
+  --professional-carolina: #0E7490;
+  --professional-juliana: #7C3AED;
+  --professional-rafael: #D97706;
+  /* DS v3.18 (P8): canais RGB para transparência (bg-overlay/50, ring-focus-ring/10). */
+  --overlay-rgb: 11 43 42;
+  --focus-ring-rgb: 14 116 144;
+  /*
+   * T1 1n: fundo da área das mensagens com pontinhos (referência Tend).
+   * T1 1o (05/11, Christian: "deixe o fundo levemente bege"): bege bem claro, entre o claro da 1n e o bege do
+   * WhatsApp (#ECE5DD), com pontinhos no mesmo tom quente. Levar ao DS v3.19.
+   */
+  --chat-background: #F4EFE7;
+  --chat-dot: rgba(120, 96, 60, 0.10);
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-card-padding: 24px;
+  --spacing-page-gutter: 32px;
+  --radius-card: 16px;
+  --radius-button: 10px;
+  --radius-input: 10px;
+  --radius-badge: 9999px;
+  --radius-sm: 6px;
+  /* DS v3.18 (P8): cartões internos (12) e peças pequenas (8). */
+  --radius-inner: 12px;
+  --radius-xs: 8px;
+  --size-button-min-height: 44px;
+  /* DS v3.18 (P8): número grande de indicador (28) e ícone médio (18). */
+  --font-size-kpi: 28px;
+  --size-icon-md: 18px;
+  --border-width-default: 1px;
+  --shadow-xs: 0 1px 2px rgba(11,43,42,0.04);
+  --shadow-sm: 0 2px 4px rgba(11,43,42,0.06);
+  --shadow-md: 0 4px 8px rgba(11,43,42,0.08);
+  --shadow-lg: 0 8px 16px rgba(11,43,42,0.10);
+  /* L18 (DS 5.1, DS3): tempos de movimento, copiados do index.css do design system. Tudo entre 150 e 250 ms, ease-out. */
+  --motion-fast: 150ms;
+  --motion-slide: 200ms;
+  --motion-page: 220ms;
+  --motion-ease: ease-out;
+  --font-body: 'Manrope', sans-serif;
+  --font-heading: 'Manrope', sans-serif;
+}
+
+/*
+ * T1 1k (05/11/2026, Christian, referência Tend): MODO NOTURNO. Mesmos nomes de token do DS, valores escuros.
+ * Ligado pela classe `dark` no <html> (data/theme.ts). Cores fixas das peças locais: components/ui/ThemeHost.tsx.
+ * Botão principal continua verde-azulado (#0E7490) com texto branco (contraste 5,4:1). Texto e links em verde-azulado
+ * ficam mais claros no escuro (abaixo), porque #0E7490 sobre fundo escuro não tem contraste.
+ * PROTÓTIPO: levar ao DS v3.19 como tema escuro oficial (tokens), depois da aprovação.
+ */
+.dark {
+  --background: #0A1716;
+  --surface: #102120;
+  --surface-muted: #172D2B;
+  --border: #24413E;
+  --border-strong: #31574F;
+  --text-primary: #E6F2F0;
+  --text-secondary: #B2C9C6;
+  --text-muted: #91AAA7;
+  --primary: #0E7490;
+  --primary-hover: #1388A8;
+  --primary-soft: #123840;
+  --primary-foreground: #FFFFFF;
+  --sidebar-background: #061F1E;
+  --sidebar-active: #0F3A38;
+  --sidebar-text: #CFE7E4;
+  --logo-tile: #F2FAFA;
+  --hover-surface: #152826;
+  --active-surface: #1B302E;
+  --success: #22C58B;
+  --success-background: #0F3A2C;
+  --success-text: #4ADE9F;
+  --badge-count: #34D399;
+  --badge-count-text: #042F2E;
+  --warning: #FBBF5C;
+  --warning-background: #3A2C10;
+  --warning-icon: #F59E0B;
+  --text-neutral: #C3D6D3;
+  --disabled-surface: #1A2B2A;
+  --disabled-text: #6E8885;
+  --error: #F87171;
+  --error-background: #3A1818;
+  --whatsapp-background: #0D1B1A;
+  --whatsapp-outgoing: #134A3A;
+  --chat-background: #0D1B1A;
+  --chat-dot: rgba(230, 242, 240, 0.05);
+  --overlay-rgb: 0 0 0;
+  --focus-ring-rgb: 56 178 207;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 10px rgba(0,0,0,0.45);
+  --shadow-lg: 0 10px 24px rgba(0,0,0,0.5);
+  color-scheme: dark;
+}
+.dark body {
+  background-color: var(--background);
+  color: var(--text-primary);
+}
+/* Texto e bordas "verde-azulado" do DS: mais claros no escuro (o fundo do botão continua o token --primary). */
+:where(.dark) .text-primary,
+:where(.dark) .hover\:text-primary:hover,
+:where(.dark) .group:hover .group-hover\:text-primary {
+  color: #5CC4DB;
+}
+:where(.dark) .border-primary {
+  border-color: #3BA9C4;
+}
+:where(.dark) ::selection {
+  background: #1388A8;
+  color: #FFFFFF;
+}
+/*
+ * T1 1m: chave liga/desliga (Toggle do DS) no escuro. Desligada: trilho escuro (o #B5D3CF ficava claro e parecia
+ * ligada). Ligada ou desligada: bolinha clara, como no modo claro (a camada automática a deixava escura).
+ */
+.dark button[aria-checked='false'].bg-\[\#B5D3CF\] {
+  background-color: var(--border-strong) !important;
+}
+.dark button[aria-checked] > .bg-white {
+  background-color: #E6F2F0 !important;
+}
+
+/*
+ * T1 1p (05/11, Christian: na Agenda no escuro os pontilhados atrapalham a leitura dos nomes). Causa: classes de borda
+ * com opacidade sobre token (`border-border/70`) não existem, porque as cores do DS são var(--x); o navegador caía no
+ * cinza-claro padrão do Tailwind (#E5E7EB), quase branco no escuro. A Agenda do Dia foi corrigida no arquivo; esta regra
+ * cobre o mesmo erro em qualquer outra tela do Painel, usando a cor do token (claro e escuro).
+ */
+[class*='border-border/'] {
+  border-color: var(--border);
+}
+[class*='border-border-strong/'] {
+  border-color: var(--border-strong);
+}
+
+/*
+ * T1 1n (05/11, Christian: Conversas mais espaçosa, referência Tend): fundo da área das mensagens com pontinhos.
+ * T1 1o: o tom é bege bem claro (token acima). `.bg-[#ECE5DD]` é a classe antiga da área das mensagens em
+ * ConversationThread (mesmo efeito, sem reescrever o arquivo). No escuro: mesmo tom escuro de antes, pontinhos claros.
+ */
+.orni-chat-bg,
+.bg-\[\#ECE5DD\] {
+  background-color: var(--chat-background) !important;
+  background-image: radial-gradient(var(--chat-dot) 1px, transparent 1.4px);
+  background-size: 18px 18px;
+}
+
+/*
+ * T1 1n (05/11, Christian: "abas sem setas" vale também aqui): no celular, o menu de seções do DS (`SectionNav`,
+ * Configurações e outras telas) tinha uma seta › e um esmaecido na ponta. Agora: sem seta e com a mesma barra de
+ * rolagem fina das outras abas (ScrollableTabs local, 1d). Levar ao DS v3.19 no SectionNav.
+ */
+.lg\:hidden.relative > .pointer-events-none.absolute.inset-y-0 {
+  display: none !important;
+}
+.lg\:hidden.relative > .overflow-x-auto {
+  -ms-overflow-style: auto !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #B5D3CF transparent;
+  padding-bottom: 6px;
+}
+.lg\:hidden.relative > .overflow-x-auto::-webkit-scrollbar {
+  display: block !important;
+  height: 6px !important;
+}
+.lg\:hidden.relative > .overflow-x-auto::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: #C7DAD8;
+}
+
+/*
+ * 10/11/2026 (Christian: troca claro ↔ escuro "não linear", parecia erro visual). Troca de tema = UMA passagem suave da
+ * tela inteira (data/theme.ts). `orni-theme-switching` desliga as animações próprias das peças durante a troca (senão
+ * cada uma muda num ritmo); o esmaecimento é feito pelo navegador (View Transitions) ou, sem ele, por `orni-theme-fade`.
+ */
+:root {
+  --orni-theme-ms: 350ms;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--orni-theme-ms);
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+.orni-theme-switching,
+.orni-theme-switching *,
+.orni-theme-switching *::before,
+.orni-theme-switching *::after {
+  transition: none !important;
+}
+.orni-theme-fade,
+.orni-theme-fade *,
+.orni-theme-fade *::before,
+.orni-theme-fade *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow, outline-color !important;
+  transition-duration: var(--orni-theme-ms) !important;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition-delay: 0s !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* T1 1k: bolinha "clínica aberta" pulsando devagar. Com "reduzir movimento", fica parada. */
+@keyframes orni-pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  70% { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+.orni-pulse {
+  animation: orni-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .orni-pulse { animation: none; opacity: 0; }
+}
+
+/* --- BASE TYPOGRAPHY START (do not edit manually) --- */
+@layer base {
+  body {
+    font-family: var(--font-body, inherit);
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading, var(--font-body, inherit));
+  }
+}
+/* --- BASE TYPOGRAPHY END --- */
+
+/*
+ * L18 (17/11/2026): regras de movimento do index.css do design system 5.1 (DS3), que o Update não trouxe para cá
+ * (correcao-DS3 §10). Copiadas sem mudança.
+ * Tudo que é clicável muda cor, fundo e borda em 150 ms, ease-out, no hover e no foco. Fica na camada base: qualquer
+ * classe `transition-*` da peça ou da tela vale por cima. Nada de transform aqui (o aperto do clique é só do `Button`).
+ */
+@layer base {
+  @media (prefers-reduced-motion: no-preference) {
+    button,
+    a[href],
+    summary,
+    [role='button'],
+    [role='tab'],
+    [role='radio'],
+    [role='menuitem'],
+    [role='switch'] {
+      transition-property: color, background-color, border-color, box-shadow;
+      transition-duration: var(--motion-fast);
+      transition-timing-function: var(--motion-ease);
+    }
+  }
+}
+
+/* DS 5.1: com "reduzir movimento" ligado, nenhuma transição (o giro do Spinner, que mostra que algo carrega, continua). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
