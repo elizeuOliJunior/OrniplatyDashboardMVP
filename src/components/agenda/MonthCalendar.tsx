@@ -86,7 +86,7 @@ export function MonthCalendar({ professionals, toolbar, monthIso, selectedIso, a
           type="button"
           onClick={() => onAppointmentClick(selectedIso, a)}
           title={conflict ?? undefined}
-          aria-label={`${a.start}, ${aulaRefOf(a) ? `aula de ${a.clientName}, ${aulaRefOf(a)!.full ? 'lotada' : `${a.service} vagas ocupadas`}` : `${a.clientName}, ${a.service}`}${third ? `. ${thirdPartyLabel(third)}` : ''}${muted(a.status) ? `. ${a.status === 'cancelled' ? 'Cancelado' : 'Faltou'}` : ''}${conflict ? `. Conflito: ${conflict}` : ''}`}
+          aria-label={`${a.start}, ${aulaRefOf(a) ? `${aulaRefOf(a)!.word} de ${a.clientName}, ${aulaRefOf(a)!.full ? 'lotada' : `${a.service} vagas ocupadas`}` : `${a.clientName}, ${a.service}`}${third ? `. ${thirdPartyLabel(third)}` : ''}${muted(a.status) ? `. ${a.status === 'cancelled' ? 'Cancelado' : 'Faltou'}` : ''}${conflict ? `. Conflito: ${conflict}` : ''}`}
           className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-hover-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${muted(a.status) ? 'bg-active-surface' : ''}`}>
           
           <span className="w-12 shrink-0 text-sm font-bold tabular-nums text-text-primary">{a.start}</span>
@@ -96,7 +96,7 @@ export function MonthCalendar({ professionals, toolbar, monthIso, selectedIso, a
               {a.clientName}
               {third && <span className="font-semibold text-primary no-underline"> · {thirdPartyLabel(third)}</span>}
             </span>
-            <span className="block truncate text-xs text-text-secondary">{aulaRefOf(a) ? `Aula em grupo · ${a.service}` : a.service}</span>
+            <span className="block truncate text-xs text-text-secondary">{aulaRefOf(a) ? `Turma · ${a.service}` : a.service}</span>
           </span>
           <span className="hidden shrink-0 items-center gap-1.5 sm:flex">
             {conflict && <StatusPill tone="error" label="Conflito" />}

@@ -6,6 +6,8 @@ import { useToast } from '../ui/Toast';
 import { ConflictNotice } from '../ui/Notice';
 import { Button } from '../Button';
 import { Select } from '../Select';
+import { SelectComCadastro } from '../ui/SelectComCadastro';
+import { NovoProfissionalHost } from '../servicos/NovoProfissionalHost';
 import { Checkbox } from '../Checkbox';
 import { InfoTip } from '../Card';
 import { professionalOptions, shortDate } from '../../data/catalogo';
@@ -68,6 +70,12 @@ export function BloquearHorarioModal({ open, onClose, defaultDate = '2026-10-01'
   const [form, setForm] = useState({ who: 'todos', date: '2026-10-01', from: '', to: '', reason: '' });
   const [wholeDay, setWholeDay] = useState(true);
   const [submitted, setSubmitted] = useState(false);
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar profissional" em "Para quem" abre a janela por cima (só no bloqueio novo). */
+  const [newPro, setNewPro] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const closeNewPro = () => {
+    setNewPro((e) => ({ ...e, open: false }));
+    window.setTimeout(() => setNewPro((e) => e.open ? e : { ...e, mounted: false }), 400);
+  };
 
   useEffect(() => {
     if (open) {
@@ -78,6 +86,7 @@ export function BloquearHorarioModal({ open, onClose, defaultDate = '2026-10-01'
       );
       setWholeDay(true);
       setSubmitted(false);
+      setNewPro({ mounted: false, open: false, typed: '' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -129,6 +138,13 @@ export function BloquearHorarioModal({ open, onClose, defaultDate = '2026-10-01'
     return aulasOn(form.date).filter((a) => !a.cancelled && !a.done && (form.who === 'todos' || a.professionalId === form.who) && toMinutes(a.start) < e && s < toMinutes(a.end));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.date, form.from, form.to, form.who, invalidRange, fullDay, folgaNeedsPro, closedDay, open]);
+  /**
+   * G5b (aulas em grupo; regra das palavras): um serviço só → a palavra dele ("1 treino cancelado"); vários serviços →
+   * neutro ("dias de turma"). `null` = neutro.
+   */
+  const aulasWords = affectedAulas.length > 0 && affectedAulas.every((a) => a.words.id === affectedAulas[0].words.id) ? affectedAulas[0].words : null;
+  const aulasCount = (n: number) =>
+  aulasWords ? `${n} ${n === 1 ? aulasWords.one : aulasWords.many}` : `${n} ${n === 1 ? 'dia de turma' : 'dias de turma'}`;
   const aulaReason = form.reason && form.reason !== 'outro' && form.reason !== 'folga' ? reasons.find((r) => r.value === form.reason)?.label : undefined;
   /** Cancela as aulas do bloqueio. Devolve a frase do aviso e o botão do próximo passo. */
   const cancelAulas = () => {
@@ -146,7 +162,8 @@ export function BloquearHorarioModal({ open, onClose, defaultDate = '2026-10-01'
       if (mode === 'avisar' && warn.length) notify = true;
     });
     const n = affectedAulas.length;
-    const text = `${n === 1 ? '1 aula cancelada' : `${n} aulas canceladas`}: ${people === 0 ? 'não havia clientes para avisar' : notify ? `${people === 1 ? 'o cliente está' : `os ${people} clientes estão`} em Falta avisar` : `a assistente avisou ${people === 1 ? 'o cliente' : `os ${people} clientes`}`}.`;
+    const cancelled = aulasWords ? aulasWords.pick(n === 1 ? 'cancelada' : 'canceladas', n === 1 ? 'cancelado' : 'cancelados') : n === 1 ? 'cancelado' : 'cancelados';
+    const text = `${aulasCount(n)} ${cancelled}: ${people === 0 ? 'não havia clientes para avisar' : notify ? `${people === 1 ? 'o cliente está' : `os ${people} clientes estão`} em Falta avisar` : `a assistente avisou ${people === 1 ? 'o cliente' : `os ${people} clientes`}`}.`;
     return { text, notify };
   };
 
@@ -207,89 +224,111 @@ export function BloquearHorarioModal({ open, onClose, defaultDate = '2026-10-01'
   };
 
   return (
+    <>
     <AppModal
-      open={open}
-      onClose={onClose}
-      size="md"
-      // L3/L13: presa no alto da tela no computador (não pula quando aparecem campos). No celular continua embaixo.
-      anchor="top"
-      title={editing ? 'Editar bloqueio' : 'Bloquear horário ou folga'}
-      description="A assistente não oferece horários dentro do período bloqueado."
-      footer={
-      <>
+        open={open}
+        // CONTRATO NOVO (janela coberta, SC2c): some enquanto o cadastro está por cima, sem perder o aviso de alterações não salvas.
+        covered={newPro.open}
+        onClose={onClose}
+        size="md"
+        // L3/L13: presa no alto da tela no computador (não pula quando aparecem campos). No celular continua embaixo.
+        anchor="top"
+        title={editing ? 'Editar bloqueio' : 'Bloquear horário ou folga'}
+        description="A assistente não oferece horários dentro do período bloqueado."
+        footer={
+        <>
           <Button variant="secondary" onClick={onClose}>
             Cancelar
           </Button>
           <Button onClick={save}>{editing ? 'Salvar bloqueio' : isFolga ? 'Registrar folga' : 'Bloquear'}</Button>
         </>
-      }>
-      
+        }>
+        
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {/* L3: a data primeiro, sozinha na linha. */}
         <div className="sm:col-span-2">
           <DateField label="Data" value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v }))} error={closedDay ?? undefined} />
         </div>
         <Select
-          label="Motivo"
-          required
-          placeholder="Escolha o motivo"
-          options={reasonOptions}
-          value={form.reason || undefined}
-          onChange={(v) => setForm((f) => ({ ...f, reason: v }))}
-          error={submitted && missingReason ? 'Escolha o motivo.' : undefined} />
-        
-        <Select
-          label="Para quem"
-          options={[...(isFolga ? [] : [{ value: 'todos', label: 'Toda a equipe' }]), ...professionalOptions, ...(archivedPro ? [{ value: form.who, label: `${archivedName} (arquivado)` }] : [])]}
-          value={isFolga && form.who === 'todos' ? undefined : form.who}
-          placeholder="Escolha o profissional"
-          onChange={(v) => setForm((f) => ({ ...f, who: v }))}
-          error={submitted && folgaNeedsPro ? 'Folga é de um profissional. Escolha quem vai faltar.' : undefined} />
-        
+            label="Motivo"
+            required
+            placeholder="Escolha o motivo"
+            options={reasonOptions}
+            value={form.reason || undefined}
+            onChange={(v) => setForm((f) => ({ ...f, reason: v }))}
+            error={submitted && missingReason ? 'Escolha o motivo.' : undefined} />
+          
+        {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar profissional" no topo, antes de "Toda a equipe" (só no bloqueio novo). */}
+        <SelectComCadastro
+            label="Para quem"
+            options={[...(isFolga ? [] : [{ value: 'todos', label: 'Toda a equipe' }]), ...professionalOptions, ...(archivedPro ? [{ value: form.who, label: `${archivedName} (arquivado)` }] : [])]}
+            value={isFolga && form.who === 'todos' ? undefined : form.who}
+            placeholder="Escolha o profissional"
+            onChange={(v) => setForm((f) => ({ ...f, who: v }))}
+            error={submitted && folgaNeedsPro ? 'Folga é de um profissional. Escolha quem vai faltar.' : undefined}
+            createLabel="Cadastrar profissional"
+            onCreate={editing ? undefined : (typed) => setNewPro({ mounted: true, open: true, typed })} />
+          
         {proError &&
-        <p role="alert" className="text-sm text-error sm:col-span-2">
+          <p role="alert" className="text-sm text-error sm:col-span-2">
             {proError}
           </p>
-        }
+          }
         {isFolga &&
-        <div className="flex items-center gap-1 sm:col-span-2">
+          <div className="flex items-center gap-1 sm:col-span-2">
             <Checkbox size="sm" label={<span className="font-semibold">Dia inteiro</span>} checked={wholeDay} onChange={(v: boolean) => setWholeDay(v)} />
             {/* L3: antes era um aviso fixo nesta janela e uma frase no toast; agora fica no "i". */}
             <InfoTip
-            label="a folga"
-            content={`A folga fica no cadastro do profissional, em Serviços e equipe › Equipe › Ausências, a mesma usada por toda a agenda. Para fechar a ${wordsNow().noun} inteira num dia, use Serviços e equipe › Funcionamento.`} />
-          
+              label="a folga"
+              content={`A folga fica no cadastro do profissional, em Serviços e equipe › Equipe › Ausências, a mesma usada por toda a agenda. Para fechar a ${wordsNow().noun} inteira num dia, use Serviços e equipe › Funcionamento.`} />
+            
           </div>
-        }
+          }
         {!fullDay &&
-        <>
+          <>
             <TimeField label="Das" value={form.from} onChange={(v) => setForm((f) => ({ ...f, from: v }))} error={submitted && !form.from ? 'Informe o início.' : undefined} />
             <TimeField
-            label="Às"
-            value={form.to}
-            onChange={(v) => setForm((f) => ({ ...f, to: v }))}
-            error={submitted && !form.to ? 'Informe o fim.' : invalidRange ? 'O fim precisa ser depois do início.' : undefined} />
-          
+              label="Às"
+              value={form.to}
+              onChange={(v) => setForm((f) => ({ ...f, to: v }))}
+              error={submitted && !form.to ? 'Informe o fim.' : invalidRange ? 'O fim precisa ser depois do início.' : undefined} />
+            
           </>
-        }
+          }
         {affectedAulas.length > 0 &&
-        <ConflictNotice
-          className="sm:col-span-2"
-          title={`${affectedAulas.length} ${affectedAulas.length === 1 ? 'aula fica' : 'aulas ficam'} dentro ${isFolga ? 'desta folga' : 'deste bloqueio'}`}
-          items={affectedAulas.map((a) => {
-            const n = a.clients.filter((c) => c.state !== 'avisou').length;
-            return { key: a.key, name: a.serviceName, when: `${a.start}, ${n} ${n === 1 ? 'cliente' : 'clientes'}` };
-          })}
-          footnote={`Ao confirmar, ${affectedAulas.length === 1 ? 'esta aula é cancelada' : 'estas aulas são canceladas'} e os clientes são avisados.${cancelGivesMakeup() ? ' Os clientes ganham reposição.' : ''}`} />
+          <ConflictNotice
+            className="sm:col-span-2"
+            title={`${aulasCount(affectedAulas.length)} ${affectedAulas.length === 1 ? 'fica' : 'ficam'} dentro ${isFolga ? 'desta folga' : 'deste bloqueio'}`}
+            items={affectedAulas.map((a) => {
+              const n = a.clients.filter((c) => c.state !== 'avisou').length;
+              return { key: a.key, name: a.serviceName, when: `${a.start}, ${n} ${n === 1 ? 'cliente' : 'clientes'}` };
+            })}
+            footnote={`Ao confirmar, ${
+            affectedAulas.length === 1 ?
+            `${affectedAulas[0].words.this} é ${affectedAulas[0].words.pick('cancelada', 'cancelado')}` :
+            aulasWords ?
+            `${aulasWords.pick('estas', 'estes')} ${aulasWords.many} são ${aulasWords.pick('canceladas', 'cancelados')}` :
+            'estes dias de turma são cancelados'} e os clientes são avisados.${
+            cancelGivesMakeup() ? ' Os clientes ganham reposição.' : ''}`} />
 
-        }
+          }
         <ConflictNotice
-          className="sm:col-span-2"
-          title={`${affected.length} ${affected.length === 1 ? 'agendamento fica' : 'agendamentos ficam'} dentro ${isFolga ? 'desta folga' : 'deste bloqueio'}`}
-          items={affected.map((a) => ({ key: a.id, name: a.clientName, when: `${a.start}–${a.end}` }))}
-          footnote="Nada será cancelado nem movido. Eles ficam em Notificações da agenda › Falta resolver até você remarcar ou cancelar; depois, falta avisar o cliente." />
-        
+            className="sm:col-span-2"
+            title={`${affected.length} ${affected.length === 1 ? 'agendamento fica' : 'agendamentos ficam'} dentro ${isFolga ? 'desta folga' : 'deste bloqueio'}`}
+            items={affected.map((a) => ({ key: a.id, name: a.clientName, when: `${a.start}–${a.end}` }))}
+            footnote="Nada será cancelado nem movido. Eles ficam em Notificações da agenda › Falta resolver até você remarcar ou cancelar; depois, falta avisar o cliente." />
+          
       </div>
-    </AppModal>);
+    </AppModal>
+    {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): ao adicionar, volta com o profissional escolhido em "Para quem". */}
+    {newPro.mounted &&
+      <NovoProfissionalHost
+        open={open && newPro.open}
+        initialName={newPro.typed || undefined}
+        onClose={closeNewPro}
+        onCreated={(m) => setForm((f) => ({ ...f, who: m.id }))} />
+
+      }
+    </>);
 
 }

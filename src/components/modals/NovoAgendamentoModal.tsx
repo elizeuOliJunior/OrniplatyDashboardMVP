@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { AppModal } from '../ui/AppModal';
 import { useToast } from '../ui/Toast';
 import { Button } from '../Button';
-import { Select } from '../Select';
 import { Textarea } from '../Textarea';
 import { Checkbox } from '../Checkbox';
 import { InfoTip } from '../Card';
@@ -12,10 +11,14 @@ import { ModalActions } from '../ui/ModalActions';
 import { NoticeInline } from '../ui/Notice';
 import { NovoClienteModal } from './NovoClienteModal';
 import { ClientSelect } from '../client/ClientSelect';
+import { SelectComCadastro } from '../ui/SelectComCadastro';
+import { NovoServicoHost } from '../servicos/NovoServicoHost';
+import { NovoProfissionalHost } from '../servicos/NovoProfissionalHost';
 import { professionalByValue, professionalOptions, serviceByValue, serviceOptions, shortDate } from '../../data/catalogo';
 import { getServices, useServices } from '../../data/servicesStore';
 import { clientIdOfRecordedName, useClientOptions } from '../../data/api/clientes';
-import { usablePackagesFor, useBackendVersion } from '../../data/api/pacotes';
+import { listPackages, usablePackagesFor, useBackendVersion } from '../../data/api/pacotes';
+import { VendaDePacoteModal } from '../pacotes/VendaDePacoteModal';
 import { DateField } from '../ui/DateField';
 import { TimeField } from '../ui/TimeField';
 import { checkNow, getAgendaState } from '../../data/agendaLive';
@@ -27,7 +30,7 @@ import { slotText } from '../../data/conflictCases';
 import { toldText } from '../../data/appointmentNotices';
 import { ChoiceCards } from '../Card';
 import { ListaEsperaModal } from './ListaEsperaModal';
-import { isGroupService } from '../../data/servicesStore';
+import { dayWordsOfService, isGroupService } from '../../data/servicesStore';
 import { setWaitlist } from '../../data/agendaLive';
 import { addAvulso } from '../../data/turmas';
 import { aulaDayText, aulaOptionText, nextAulasOfService, useAulasVersion } from '../../data/aulas';
@@ -152,6 +155,17 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
   /** L24c: o nome digitado no campo de cliente, para abrir o Novo cliente já com ele. */
   const [newClientName, setNewClientName] = useState('');
   const [newClientOpen, setNewClientOpen] = useState(false);
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" e "Cadastrar profissional" abrem a janela de cadastro por cima (montada só enquanto usada). */
+  const [newSvc, setNewSvc] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const [newPro, setNewPro] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const closeNewSvc = () => {
+    setNewSvc((e) => ({ ...e, open: false }));
+    window.setTimeout(() => setNewSvc((e) => e.open ? e : { ...e, mounted: false }), 400);
+  };
+  const closeNewPro = () => {
+    setNewPro((e) => ({ ...e, open: false }));
+    window.setTimeout(() => setNewPro((e) => e.open ? e : { ...e, mounted: false }), 400);
+  };
   /** L5: o que impede o horário que veio preenchido no Remarcar (só texto; calculado ao abrir). */
   const [openIssue, setOpenIssue] = useState<{text: string;professional: string;date: string;time: string;} | null>(null);
   useBackendVersion();
@@ -166,6 +180,8 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
   useAulasVersion();
   const [aulaPick, setAulaPick] = useState('');
   const [waitOpen, setWaitOpen] = useState(false);
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2c): "Vender pacote" no campo Pacote abre a venda por cima. */
+  const [saleOpen, setSaleOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -182,6 +198,9 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
       setPackageSaleId('');
       setClientConfirmed(false);
       setNewClientName('');
+      setNewSvc({ mounted: false, open: false, typed: '' });
+      setNewPro({ mounted: false, open: false, typed: '' });
+      setSaleOpen(false);
       setAulaPick('');
       // L5: só leitura, com a MESMA regra única (checkNow) e o mesmo relógio (NOW). Nada é trocado nos campos.
       const f = checked.form;
@@ -294,12 +313,16 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
   // G3 (F-052): pacotes do cliente que valem para este serviço na data escolhida (pré-vínculo opcional).
   const usable = mode === 'novo' && open && form.client && serviceLabel ? usablePackagesFor(clientIdOfRecordedName(form.client), serviceLabel, form.date) : [];
   const linked = usable.some((p) => p.id === packageSaleId) ? packageSaleId : '';
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC3): o campo Pacote fica ativo quando há cliente e serviço. */
+  const pkgReady = mode === 'novo' && !!form.client && !!serviceLabel;
 
   const reasonOk = reason.trim().length >= MIN_REASON;
 
   /* G2: serviço em grupo → aulas. */
   const groupMode = mode === 'novo' && serviceActive && isGroup(form.service);
   const aulas = groupMode ? nextAulasOfService(form.service, 8) : [];
+  /** G5b: um serviço só → a palavra dele ("esta aula", "este treino"). */
+  const gw = dayWordsOfService(groupMode ? form.service : '');
   const pickedAula = aulas.find((x) => x.key === aulaPick && !x.full);
   const groupClientId = form.client ? clientIdOfRecordedName(form.client) : null;
   const alreadyIn = !!pickedAula && !!groupClientId && pickedAula.clients.some((c) => c.clientId === groupClientId);
@@ -307,7 +330,7 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
     setSubmitted(true);
     if (!form.client || !pickedAula || alreadyIn || !groupClientId) return;
     addAvulso(pickedAula.turma.id, groupClientId, pickedAula.origIso);
-    toast({ title: 'Cliente na aula', description: `${form.client} · ${pickedAula.serviceName}, ${aulaDayText(pickedAula.iso)}, às ${pickedAula.start}. Entrou como avulso nesta aula.`, duration: 8000 });
+    toast({ title: `Cliente ${gw.inThe}`, description: `${form.client} · ${pickedAula.serviceName}, ${aulaDayText(pickedAula.iso)}, às ${pickedAula.start}. Entrou como avulso ${gw.in}.`, duration: 8000 });
     onClose();
   };
 
@@ -365,7 +388,8 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
   return (
     <>
     <AppModal
-        open={open && !newClientOpen && !waitOpen}
+        open={open && !waitOpen}
+        covered={newClientOpen || newSvc.open || newPro.open || saleOpen}
         onClose={onClose}
         title={mode === 'remarcar' ? 'Remarcar agendamento' : 'Novo agendamento'}
         description={defaults?.date && !defaults?.time ? dayInfo && !dayInfo.open ? 'Nesta data não há horários disponíveis. Escolha outra data.' : 'A data já está escolhida. Escolha o horário entre os disponíveis.' : 'Horários ocupados, em pausa, bloqueados, de folga ou sem o intervalo entre atendimentos ficam indisponíveis.'}
@@ -374,7 +398,7 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
           <Button variant="secondary" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={save}>{groupMode ? 'Pôr na aula' : needsEx ? 'Registrar encaixe e agendar' : mode === 'remarcar' ? 'Salvar novo horário' : 'Agendar'}</Button>
+          <Button onClick={save}>{groupMode ? `Pôr ${gw.inThe}` : needsEx ? 'Registrar encaixe e agendar' : mode === 'remarcar' ? 'Salvar novo horário' : 'Agendar'}</Button>
         </ModalActions>
         }>
         
@@ -403,9 +427,10 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
               } />
             
         </div>
-        <Select key={`svc-${form.service || 'vazio'}`} label="Serviço" required placeholder="Escolha o serviço" options={serviceChoices} value={serviceActive ? form.service : undefined} onChange={set('service')} error={missing.service && (submitted || !!form.service) ? form.service ? 'O serviço deste horário está arquivado ou não existe mais. Escolha um serviço ativo.' : 'Escolha o serviço.' : undefined} />
+        {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" e "Cadastrar profissional" no topo da lista, só no agendamento novo (como o cliente). */}
+        <SelectComCadastro key={`svc-${form.service || 'vazio'}`} label="Serviço" required placeholder="Escolha o serviço" options={serviceChoices} value={serviceActive ? form.service : undefined} onChange={set('service')} error={missing.service && (submitted || !!form.service) ? form.service ? 'O serviço deste horário está arquivado ou não existe mais. Escolha um serviço ativo.' : 'Escolha o serviço.' : undefined} createLabel="Cadastrar serviço" onCreate={mode === 'novo' ? (typed) => setNewSvc({ mounted: true, open: true, typed }) : undefined} />
         {!groupMode &&
-          <Select
+          <SelectComCadastro
             key={`pro-${form.professional || 'vazio'}`}
             label="Profissional"
             required
@@ -414,7 +439,9 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
             value={form.professional || undefined}
             onChange={set('professional')}
             helperText={serviceActive && professionalChoices.length < professionalOptions.length ? `Só quem faz ${serviceLabel}.` : undefined}
-            error={submitted && missing.professional ? 'Escolha o profissional.' : undefined} />
+            error={submitted && missing.professional ? 'Escolha o profissional.' : undefined}
+            createLabel="Cadastrar profissional"
+            onCreate={mode === 'novo' ? (typed) => setNewPro({ mounted: true, open: true, typed }) : undefined} />
 
           }
         {quemFazNotice &&
@@ -427,7 +454,7 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
         {groupMode &&
           <div className="flex flex-col gap-3 sm:col-span-2">
             {aulas.length === 0 ?
-            <p className="text-sm text-text-secondary">Nenhuma aula deste serviço nos próximos dias. Crie ou reative uma turma em Serviços e equipe › Turmas.</p> :
+            <p className="text-sm text-text-secondary">Nenhum{gw.pick('a', '')} {gw.one} deste serviço nos próximos dias. Crie ou reative uma turma em Serviços e equipe › Turmas.</p> :
 
             <ChoiceCards
               label="Escolha a turma e o dia"
@@ -436,14 +463,14 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
               value={pickedAula ? aulaPick : ''}
               onChange={(v) => setAulaPick(v)}
               options={aulas.map((x) => ({ value: x.key, title: aulaOptionText(x), disabled: x.full }))}
-              helperText="Entra como avulso só nesta aula e paga por aula." />
+              helperText={`Entra como avulso só ${gw.in} e paga por ${gw.one}.`} />
 
             }
-            {submitted && !pickedAula && aulas.length > 0 && <p className="text-sm text-error">Escolha a aula.</p>}
-            {alreadyIn && <p className="text-sm text-error">{form.client} já está nesta aula.</p>}
+            {submitted && !pickedAula && aulas.length > 0 && <p className="text-sm text-error">Escolha {gw.the}.</p>}
+            {alreadyIn && <p className="text-sm text-error">{form.client} já está {gw.in}.</p>}
             {aulas.some((x) => x.full) &&
             <div className="flex flex-wrap items-center gap-3">
-                <p className="text-sm text-text-secondary">Aula lotada? Ponha o cliente na lista de espera da turma.</p>
+                <p className="text-sm text-text-secondary">{gw.One} {gw.pick('lotada', 'lotado')}? Ponha o cliente na lista de espera da turma.</p>
                 <Button size="md" variant="secondary" onClick={() => setWaitOpen(true)}>
                   Pôr na lista de espera
                 </Button>
@@ -526,14 +553,24 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
           </div>
             }
 
-        {usable.length > 0 &&
+        {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC3): "Pacote (opcional)" aparece SEMPRE no agendamento novo
+                 (Remarcar continua sem o campo). Três estados: sem cliente ou sem serviço → desativado, "Escolha o cliente e o
+                 serviço"; com os dois e sem pacote que valha → ativo em "Não vincular", com "Vender pacote" no topo; com pacote →
+                 como antes. A regra de quais pacotes valem (`usablePackagesFor`) e o vínculo não mudaram. Desativado, a lista fica
+                 vazia para o campo mostrar o texto de espera (com "Não vincular" na lista, o `Select` mostrava esse nome). */}
+        {mode === 'novo' &&
             <div className="sm:col-span-2">
-            <Select
+            <SelectComCadastro
+                key={pkgReady ? 'pkg-pronto' : 'pkg-espera'}
                 label="Pacote (opcional)"
-                options={[{ value: '', label: 'Não vincular' }, ...usable.map((p) => ({ value: p.id, label: `${p.service_name_snapshot} · ${p.saldo} ${p.saldo === 1 ? 'sessão restante' : 'sessões restantes'}`, description: `Vendido em ${shortDate(p.sold_at)}${p.expires_at ? ` · vale até ${shortDate(p.expires_at)}` : ''}` }))]}
-                value={linked}
+                disabled={!pkgReady}
+                placeholder="Escolha o cliente e o serviço"
+                options={pkgReady ? [{ value: '', label: 'Não vincular' }, ...usable.map((p) => ({ value: p.id, label: `${p.service_name_snapshot} · ${p.saldo} ${p.saldo === 1 ? 'sessão restante' : 'sessões restantes'}`, description: `Vendido em ${shortDate(p.sold_at)}${p.expires_at ? ` · vale até ${shortDate(p.expires_at)}` : ''}` }))] : []}
+                value={pkgReady ? linked : undefined}
                 onChange={setPackageSaleId}
-                helperText="Vincular não usa a sessão agora. A sessão só é usada quando o atendimento for fechado." />
+                helperText={!pkgReady ? undefined : usable.length > 0 ? 'Vincular não usa a sessão agora. A sessão só é usada quando o atendimento for fechado.' : 'Este cliente não tem pacote deste serviço.'}
+                createLabel="Vender pacote"
+                onCreate={pkgReady ? () => setSaleOpen(true) : undefined} />
               
           </div>
             }
@@ -564,6 +601,23 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
           onClose();
         }} />
       
+    {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2c): a venda que já existe, com o cliente e o serviço deste
+           agendamento; ao vender, volta com o pacote novo escolhido. Cancelar volta sem mudar nada. */}
+    <VendaDePacoteModal
+        open={open && saleOpen}
+        onClose={() => setSaleOpen(false)}
+        clientePreSelecionadoId={form.client && clientIdOfRecordedName(form.client) || undefined}
+        servicoPreSelecionadoId={serviceActive ? form.service : undefined}
+        onSalvo={() => {
+          const id = form.client ? clientIdOfRecordedName(form.client) : null;
+          const novo = id ?
+          listPackages({ client_id: id }).
+          filter((p) => p.service_id === form.service && p.status === 'active' && p.saldo > 0).
+          sort((a, b) => a.created_at < b.created_at ? 1 : -1)[0] :
+          undefined;
+          if (novo) setPackageSaleId(novo.id);
+        }} />
+      
     {/* W3 (A1-12): janela de cliente novo que já existe em Clientes (dona: faixa W5). L24c: abre com o nome digitado; o cliente cadastrado já vem escolhido. */}
     <NovoClienteModal
         open={open && newClientOpen}
@@ -571,6 +625,26 @@ export function NovoAgendamentoModal({ open, onClose, defaults, mode = 'novo', i
         initialName={newClientName}
         onSaved={(c) => setForm((f) => ({ ...f, client: c.name }))} />
       
+    {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): cadastro aberto pelos seletores; ao adicionar, volta com o item escolhido. Cancelar volta sem mudar nada. */}
+    {newSvc.mounted &&
+      <NovoServicoHost
+        open={open && newSvc.open}
+        initialName={newSvc.typed || undefined}
+        onClose={closeNewSvc}
+        onCreated={(s) => {
+          if (s.active) set('service')(s.id);
+        }} />
+
+      }
+    {newPro.mounted &&
+      <NovoProfissionalHost
+        open={open && newPro.open}
+        initialName={newPro.typed || undefined}
+        initialServiceIds={serviceActive ? [form.service] : undefined}
+        onClose={closeNewPro}
+        onCreated={(m) => set('professional')(m.id)} />
+
+      }
     </>);
 
 }

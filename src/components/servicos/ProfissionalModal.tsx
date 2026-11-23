@@ -28,6 +28,10 @@ import { weekSummary } from './EquipeTab';
 import { ArchiveConfirm } from './ArchiveConfirm';
 // L22c (18/11/2026): máscara de telefone do helper único. Continua guardando só os dígitos (phoneDigits), como antes.
 import { maskPhoneBR, phoneDigits } from '../../utils/masks';
+// CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar área de atuação".
+import { SelectComCadastro, sameName, useSameNameNotice } from '../ui/SelectComCadastro';
+import { NovaAreaModal } from './NovaAreaModal';
+import { addPracticeArea, useCustomPracticeAreas, withCustomAreas } from '../../data/practiceAreas';
 
 type ProfissionalModalProps = {
   open: boolean;
@@ -43,7 +47,19 @@ type ProfissionalModalProps = {
    */
   onSave: (member: TeamMember, serviceIds: string[], info: SaveInfo) => void;
   onArchive: (member: TeamMember, active: boolean) => void;
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): nome já preenchido (texto digitado no seletor que abriu a janela). */
+  initialName?: string;
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): serviços já marcados ao criar (ex.: o serviço da turma que abriu a janela). */
+  initialServiceIds?: string[];
 };
+
+/**
+ * CONTRATO NOVO (janela com etapas, 23/11/2026): só na CRIAÇÃO, a janela vira etapas Dados → Serviços → Jornada. "Próximo"
+ * confere só os obrigatórios da aba atual; "Voltar" segue a ordem das abas; em Jornada, Ausências e Intervalo o botão
+ * principal é "Adicionar profissional". As abas continuam clicáveis. Na edição nada muda.
+ */
+const CREATE_STEPS = ['dados', 'servicos', 'jornada'];
+const TAB_ORDER = ['dados', 'servicos', 'jornada', 'ausencias', 'intervalo'];
 
 export type SaveInfo = {phoneAdded: boolean;scheduleChanged: boolean;conflicts: number;firstConflict?: {iso: string;apptId: string;};};
 
@@ -84,7 +100,7 @@ function BufferTimeline({ minutes }: {minutes: number;}) {
  * círculo das iniciais usa `Avatar color` e muda na hora com a cor escolhida. Uma cor antiga fora da paleta continua
  * como "Cor atual" até alguém trocar (como antes).
  */
-export function ProfissionalModal({ open, onClose, editing, services, initialTab, focusWhatsApp, onSave, onArchive }: ProfissionalModalProps) {
+export function ProfissionalModal({ open, onClose, editing, services, initialTab, focusWhatsApp, onSave, onArchive, initialName, initialServiceIds }: ProfissionalModalProps) {
   const { hours, members } = useTeam();
   const agenda = useAgendaData();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -96,6 +112,13 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
   const [ack, setAck] = useState(false);
   const [specDraft, setSpecDraft] = useState('');
   const [confirmArchive, setConfirmArchive] = useState(false);
+  /** CONTRATO NOVO (janela com etapas, 23/11/2026): abas já conferidas pelo "Próximo" (mostram os erros delas). */
+  const [checkedTabs, setCheckedTabs] = useState<string[]>([]);
+  const tabsTopRef = useRef<HTMLDivElement>(null);
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar área de atuação" por cima. */
+  const customAreas = useCustomPracticeAreas();
+  const [newArea, setNewArea] = useState<{open: boolean;typed: string;}>({ open: false, typed: '' });
+  const sameNameNotice = useSameNameNotice();
 
   useEffect(() => {
     if (!open) return;
@@ -110,10 +133,11 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
         overrides: editing.overrides.map((o) => ({ ...o, ranges: o.ranges.map((r) => ({ ...r })) })),
         bufferMin: editing.bufferMin
       } :
-      blank()
+      { ...blank(), name: (initialName ?? '').trim().slice(0, 80), serviceIds: [...(initialServiceIds ?? [])] }
     );
     setTab(initialTab ?? 'dados');
     setSubmitted(false);
+    setCheckedTabs([]);
     setAck(false);
     setSpecDraft('');
     // W2 (A3-09): depois do foco automático da janela, leva o cursor ao WhatsApp.
@@ -125,6 +149,8 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
   }, [open]);
 
   const setP = <K extends keyof ProfessionalProfile,>(k: K, v: ProfessionalProfile[K]) => setForm((f) => ({ ...f, profile: { ...f.profile, [k]: v } }));
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): as áreas de sempre + as cadastradas pela empresa. */
+  const areaOptions = withCustomAreas(practiceAreaOptions(currentContent().roleOptions, form.profile.role), customAreas);
 
   const scheduleError = scheduleErrors(form);
   const errors = {
@@ -204,7 +230,33 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
     setSpecDraft('');
   };
 
-  const err = (k: keyof typeof errors) => submitted ? errors[k] : undefined;
+  const tabOfKey = (k: keyof typeof errors) => tabOf.find(([key]) => key === k)?.[1];
+  const err = (k: keyof typeof errors) => submitted || checkedTabs.includes(tabOfKey(k) ?? '') ? errors[k] : undefined;
+  // CONTRATO NOVO (janela com etapas, 23/11/2026)
+  const isCreate = !editing;
+  const tabIndex = TAB_ORDER.indexOf(tab);
+  const isLastStep = !CREATE_STEPS.includes(tab) || tab === CREATE_STEPS[CREATE_STEPS.length - 1];
+  /** CONTRATO NOVO (janela de tamanho único, 23/11/2026): o miolo volta ao topo na mesma hora da troca (antes, um
+   *  instante depois), para a aba nova nunca aparecer rolada e depois pular. Vale também para o clique na aba. */
+  const scrollTop = () => {
+    const box = tabsTopRef.current?.closest('.overflow-y-auto') as HTMLElement | null;
+    box?.scrollTo({ top: 0 });
+  };
+  const next = () => {
+    setCheckedTabs((l) => l.includes(tab) ? l : [...l, tab]);
+    if (tabOf.some(([k, t]) => t === tab && errors[k])) return;
+    const i = CREATE_STEPS.indexOf(tab);
+    if (i >= 0 && i < CREATE_STEPS.length - 1) {
+      scrollTop();
+      setTab(CREATE_STEPS[i + 1]);
+    }
+  };
+  const back = () => {
+    if (tabIndex > 0) {
+      scrollTop();
+      setTab(TAB_ORDER[tabIndex - 1]);
+    }
+  };
   // L24b: as 14 cores do DS 6.2, na ordem dele. Cor antiga fora da paleta: aparece no fim como "Cor atual".
   const palette = PROFESSIONAL_COLORS.map((c) => ({ key: c.id, label: c.name, hex: c.hex }));
   const colorOptions = palette.some((c) => sameHex(c.hex, form.color)) ? palette : [...palette, { key: 'atual', label: 'Cor atual', hex: form.color }];
@@ -219,6 +271,7 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
         onClose={onClose}
         dirtyValue={form}
         size="lg"
+        steadyHeight
         title={editing ? editing.name : 'Novo profissional'}
         description={`A assistente e a agenda só oferecem horários dentro da jornada deste profissional e do horário ${currentWords().of}, fora das pausas e das ausências.`}
         footer={
@@ -234,23 +287,44 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
             <Button variant="secondary" onClick={onClose}>
               Cancelar
             </Button>
-            <Button onClick={save} disabled={conflicts.length > 0 && !ack} aria-describedby={conflicts.length > 0 && !ack ? 'pro-confirmar-aviso' : undefined}>
-              {editing ? 'Salvar' : 'Adicionar profissional'}
-            </Button>
+            {/* CONTRATO NOVO (janela com etapas, 23/11/2026): Cancelar · Voltar · Próximo/Adicionar, só na criação. O texto
+               escondido tira o "Voltar" da regra de botão que fecha a janela (AppModal) e dá nome completo ao leitor de tela. */}
+            {isCreate && tabIndex > 0 &&
+          <Button variant="secondary" onClick={back}>
+                Voltar<span className="sr-only"> para a etapa anterior</span>
+              </Button>
+          }
+            {isCreate && !isLastStep ?
+          <Button onClick={next}>Próximo</Button> :
+
+          <Button onClick={save} disabled={conflicts.length > 0 && !ack} aria-describedby={conflicts.length > 0 && !ack ? 'pro-confirmar-aviso' : undefined}>
+                {editing ? 'Salvar' : 'Adicionar profissional'}
+              </Button>
+          }
           </ModalActions>
         }>
         
         {conflicts.length > 0 && !ack && <p id="pro-confirmar-aviso" className="-mt-2 mb-3 text-sm text-text-secondary">Para salvar, confirme o aviso de agendamentos em conflito no fim desta janela.</p>}
-        <Tabs value={tab} onValueChange={setTab}>
-          <ScrollableTabs>
-            <TabsList aria-label="Seções do profissional" className={`min-w-max ${tabListNoScroll}`}>
-              <TabsTrigger value="dados">Dados</TabsTrigger>
-              <TabsTrigger value="servicos">Serviços</TabsTrigger>
-              <TabsTrigger value="jornada">Jornada</TabsTrigger>
-              <TabsTrigger value="ausencias">Ausências</TabsTrigger>
-              <TabsTrigger value="intervalo">Intervalo</TabsTrigger>
-            </TabsList>
-          </ScrollableTabs>
+        <div ref={tabsTopRef} />
+        <Tabs
+          value={tab}
+          onValueChange={(t) => {
+            scrollTop();
+            setTab(t);
+          }}>
+          
+          {/* CONTRATO NOVO (janela de tamanho único, 23/11/2026): as abas ficam paradas no topo do miolo; só o conteúdo rola. */}
+          <div className="sticky top-0 z-10 bg-white">
+            <ScrollableTabs>
+              <TabsList aria-label="Seções do profissional" className={`min-w-max ${tabListNoScroll}`}>
+                <TabsTrigger value="dados">Dados</TabsTrigger>
+                <TabsTrigger value="servicos">Serviços</TabsTrigger>
+                <TabsTrigger value="jornada">Jornada</TabsTrigger>
+                <TabsTrigger value="ausencias">Ausências</TabsTrigger>
+                <TabsTrigger value="intervalo">Intervalo</TabsTrigger>
+              </TabsList>
+            </ScrollableTabs>
+          </div>
 
           {/* ───────── A) Dados ───────── */}
           <TabsContent value="dados" className="mt-5">
@@ -313,7 +387,16 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Input label="Nome de exibição" required value={form.name} maxLength={80} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} error={err('name')} helperText={`Como aparece na agenda e como a assistente apresenta. Ex.: ${currentContent().teamExample.name}.`} />
-                <Select label="Área de atuação" placeholder="Escolha a área" options={practiceAreaOptions(currentContent().roleOptions, form.profile.role)} value={form.profile.role || undefined} onChange={(v) => setP('role', v)} />
+                {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): primeira linha "Cadastrar área de atuação". */}
+                <SelectComCadastro
+                  label="Área de atuação"
+                  placeholder="Escolha a área"
+                  options={areaOptions}
+                  value={form.profile.role || undefined}
+                  onChange={(v) => setP('role', v)}
+                  createLabel="Cadastrar área de atuação"
+                  onCreate={(typed) => setNewArea({ open: true, typed })} />
+                
                 <Input
                   id="pro-whatsapp"
                   label="WhatsApp"
@@ -410,7 +493,15 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
 
               })}
             </ul>
-            {form.serviceIds.length === 0 && <p className="mt-2 text-sm text-text-secondary">Sem serviço marcado, a assistente não oferece este profissional.</p>}
+            {/* CONTRATO NOVO (janela com etapas, 23/11/2026): na criação, aviso no padrão do "Falta WhatsApp" da aba Dados. Não trava. */}
+            {form.serviceIds.length === 0 && (
+            isCreate ?
+            <NoticeInline className="mt-3" tone="warning" title="Nenhum serviço marcado">
+                  Sem isso, a assistente não oferece horários {form.name.trim() ? `de ${form.name.trim()}` : 'do profissional'}. Dá para salvar e marcar depois.
+                </NoticeInline> :
+
+            <p className="mt-2 text-sm text-text-secondary">Sem serviço marcado, a assistente não oferece este profissional.</p>)
+            }
           </TabsContent>
 
           {/* ───────── C) Jornada ───────── */}
@@ -426,7 +517,7 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
                 O que estiver fora do horário {currentWords().of} não é oferecido pela agenda nem pela assistente.
               </NoticeInline>
             }
-            {submitted && errors.schedule &&
+            {(submitted || checkedTabs.includes('jornada')) && errors.schedule &&
             <p role="alert" className="mt-2 text-sm text-error">
                 Revise a jornada: {errors.schedule}
               </p>
@@ -471,6 +562,22 @@ export function ProfissionalModal({ open, onClose, editing, services, initialTab
           onAck={setAck} />
         
       </AppModal>
+
+      {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): área nova volta já escolhida; nome repetido escolhe a que existe. */}
+      <NovaAreaModal
+        open={newArea.open}
+        onClose={() => setNewArea((a) => ({ ...a, open: false }))}
+        initialName={newArea.typed}
+        onSave={(name) => {
+          const existing = sameName(areaOptions, name);
+          if (existing) {
+            setP('role', existing.value);
+            sameNameNotice(existing.label);
+            return;
+          }
+          setP('role', addPracticeArea(name));
+        }} />
+      
 
       <ArchiveConfirm
         open={confirmArchive}

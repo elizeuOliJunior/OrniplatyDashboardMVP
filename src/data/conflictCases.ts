@@ -23,6 +23,9 @@ import type { CalAppointment, CancelledBy } from './agendaStore';
 import { agendaProfessionalOf } from './availability';
 import { automacoesStore, automationSituation, automations } from './automacoes';
 import { getSettings } from './settingsStore';
+import { getTurmas } from './turmas';
+import { dayWordsOfService } from './servicesStore';
+import { wordsNow } from './segment';
 
 export const CHANGE_AUTOMATION_ID = 'avisar-mudanca-horario';
 export const changeAutomationOn = () => {
@@ -94,11 +97,18 @@ export const slotText = (iso: string, start: string, professionalId?: string) =>
   return `${day.charAt(0).toLowerCase()}${day.slice(1)}, às ${start}${who ? `, com ${who}` : ''}`;
 };
 
+/** G5 (CONTRATO NOVO, aulas em grupo): a palavra do serviço de uma aula pela chave (`turma@data`). */
+const wordsOfAulaKey = (key: string) => dayWordsOfService(getTurmas().turmas.find((t) => t.id === key.split('@')[0])?.serviceId ?? '');
+
 /** O que mudou, em texto curto da equipe. */
 export function changeText(c: ConflictCase): string {
   if (!c.change) return '';
   // G2 (aulas em grupo; CONTRATO NOVO): caso de cliente de uma aula.
-  if (c.aulaKey) return c.change.kind === 'cancelado' ? 'Aula cancelada' : `Aula mudou para ${slotText(c.change.iso, c.change.start)}`;
+  // G5: com a palavra do serviço ("Aula cancelada" / "Treino cancelado").
+  if (c.aulaKey) {
+    const w = wordsOfAulaKey(c.aulaKey);
+    return c.change.kind === 'cancelado' ? `${w.One} ${w.pick('cancelada', 'cancelado')}` : `${w.One} mudou para ${slotText(c.change.iso, c.change.start)}`;
+  }
   if (c.change.kind === 'cancelado') return 'Cancelado pela clínica';
   return `Remarcado para ${slotText(c.change.iso, c.change.start, c.change.professionalId)}`;
 }
@@ -180,19 +190,21 @@ export function noteCaseChange(appt: CalAppointment, fromIso: string, conflictRe
  * mensagem pronta da aula, pela MESMA regra dos agendamentos (`resolveChange`, cancelamento da empresa): com "Avisar mudança
  * de horário" ligada, vai direto para Resolvido; desligada, entra em "Falta avisar" com "Chamar no WhatsApp" e "Avisado".
  * O caso da própria aula em "Falta resolver" (aula sob bloqueio), se houver, fecha como resolvido.
+ * G5b: o motivo usa a palavra do negócio em uso (`wordsNow`): "Treino cancelado pelo salão."
  */
 export function noteAulaChange(
 aula: {key: string;id: string;serviceName: string;iso: string;start: string;professionalId: string;},
 clients: {clientId: string;name: string;message: string;}[],
 change: CaseChange)
 : 'auto' | 'avisar' {
-  const reason = change.kind === 'cancelado' ? 'Aula cancelada pela empresa.' : 'Aula mudou de horário.';
+  const w = wordsOfAulaKey(aula.key);
+  const reason = change.kind === 'cancelado' ? `${w.One} ${w.pick('cancelada', 'cancelado')} ${wordsNow().by}.` : `${w.One} mudou de horário.`;
   clients.forEach((c) => {
     const ex: ConflictCase = { id: `${aula.id}:${c.clientId}`, client: c.name, service: aula.serviceName, iso: aula.iso, start: aula.start, professionalId: aula.professionalId, reason, state: 'resolver', attempts: [], openedAt: nowStamp(), message: c.message, aulaKey: aula.key };
     resolveChange(ex, change, 'clinic');
   });
   const own = caseOf(aula.id);
-  if (own && own.state === 'resolver') put({ ...own, state: 'resolvido', change, outcome: change.kind === 'cancelado' ? 'Aula cancelada: os clientes entram em “Falta avisar”.' : 'Aula mudou de horário: os clientes entram em “Falta avisar”.', closedAt: nowStamp() });
+  if (own && own.state === 'resolver') put({ ...own, state: 'resolvido', change, outcome: change.kind === 'cancelado' ? `${w.One} ${w.pick('cancelada', 'cancelado')}: os clientes entram em “Falta avisar”.` : `${w.One} mudou de horário: os clientes entram em “Falta avisar”.`, closedAt: nowStamp() });
   emit();
   return changeAutomationOn() ? 'auto' : 'avisar';
 }

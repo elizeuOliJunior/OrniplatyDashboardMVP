@@ -116,7 +116,7 @@ const SAMPLE_AUTHOR = 'Marina Souza';
 /** Relógio único do protótipo (data/agendaStore.ts). */
 const agora = () => nowIso();
 
-// ── amostra (dados de exemplo do protótipo) ────────────────────────────────────────────────────────────────────────────────────────────
+// ── amostra (dados de exemplo do protótipo) ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** W5 (A4-15): cada sessão usada da amostra aponta para o atendimento concluído correspondente (agenda ou histórico do cadastro). */
 const consumo = (id: string, date: string, appointmentId: string | null = null): PackageLedgerEntry => ({
@@ -187,6 +187,16 @@ let sales: SaleRow[] = [
   preferred_professional_id: null, cancelled_at: null, cancel_reason: null, frozen_at: null, freeze_reason: null, notes: null, created_at: '2026-03-02T09:00:00',
   ledger: [grant('l41', 10, '2026-03-02'), ...GABRIELA_DRENAGEM.map((d, i) => consumo(`l4x${i}`, d, `h-g${i}`))],
   changes: []
+},
+// G3 (lote G3 item F, aulas em grupo, 23/11/2026; CONTRATO NOVO): pacote de amostra de "Pilates em grupo" da Mariana
+// Teixeira, fixa da turma de terça e quinta (data/turmas.ts, `insc-1` paga por ele). Vendido antes de 28/09 (amostra
+// histórica). Cada presença na chamada usa uma sessão pelo mesmo `consumeSession` do fechamento.
+{
+  id: 'pk6', client_id: 'mariana-teixeira', client_name: 'Mariana Teixeira', service_id: 'pilates-grupo', service_name_snapshot: 'Pilates em grupo',
+  total_sessions: 8, total_amount_cents: 44000, sold_at: '2026-09-14', expires_at: '2026-12-14', payment_plan: 'cash', card_installments: null,
+  preferred_professional_id: 'rafael', cancelled_at: null, cancel_reason: null, frozen_at: null, freeze_reason: null, notes: null, created_at: '2026-09-14T09:00:00',
+  ledger: [grant('l61', 8, '2026-09-14')],
+  changes: []
 }];
 
 
@@ -197,7 +207,9 @@ rec('f21', 'fernanda-lima', 'pk2', '2026-08-10', 36000, 'received', 'pix', 1, 3,
 rec('f22', 'fernanda-lima', 'pk2', '2026-09-10', 36000, 'received', 'pix', 2, 3, 'Limpeza de pele · 6 sessões'),
 rec('f23', 'fernanda-lima', 'pk2', '2026-10-10', 36000, 'pending', null, 3, 3, 'Limpeza de pele · 6 sessões'),
 rec('f51', 'helena-duarte', 'pk5', '2026-07-15', 100000, 'received', 'pix', null, null, 'Peeling químico · 4 sessões'),
-rec('f41', 'gabriela-rocha', 'pk4', '2026-03-02', 150000, 'received', 'cash', null, null, 'Drenagem linfática · 10 sessões')
+rec('f41', 'gabriela-rocha', 'pk4', '2026-03-02', 150000, 'received', 'cash', null, null, 'Drenagem linfática · 10 sessões'),
+// G3 (item F): pagamento do pacote de amostra de Pilates em grupo (à vista, Pix, na venda).
+rec('f61', 'mariana-teixeira', 'pk6', '2026-09-14', 44000, 'received', 'pix', null, null, 'Pilates em grupo · 8 sessões')
 // W5 (G10, 11/11/2026): o dinheiro de um atendimento é o FECHAMENTO dele (data/convenios.ts). Saíram daqui:
 //  - fa1 (Carla, 01/10) e fa4 (Gabriela, 30/09, "Aguardando valor"): lançamentos repetidos, remoção aprovada pelo Christian;
 //  - fa2 (Igor, 28/09) e fa3 (Diego, 29/09): viraram fechamentos da amostra, ligados aos atendimentos s3 e t4.
@@ -214,7 +226,7 @@ method: string | null, n: number | null, total: number | null, pkg: string | nul
   };
 }
 
-// ── store ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── store ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 let version = 0;
 const listeners = new Set<() => void>();
@@ -272,7 +284,7 @@ const find = (id: string) => {
 const change = (s: SaleRow, field: string, old_value: string | null, new_value: string | null, reason: string | null) =>
 s.changes.push({ id: `c${Date.now()}${s.changes.length}`, field, old_value, new_value, reason, changed_by_name: actor(), changed_at: agora() });
 
-// ── endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── endpoints ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** GET /api/packages?client_id=… */
 export function listPackages(params: {client_id?: string;} = {}): (PackageSale & {client_name: string;})[] {

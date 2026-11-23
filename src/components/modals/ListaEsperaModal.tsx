@@ -5,10 +5,13 @@ import { NoticeInline } from '../ui/Notice';
 import { DateField } from '../ui/DateField';
 import { Button } from '../Button';
 import { Input } from '../Input';
-import { Select } from '../Select';
 import { PillGroup } from '../Pill';
 import { ClientSelect } from '../client/ClientSelect';
 import { NovoClienteModal } from './NovoClienteModal';
+import { SelectComCadastro } from '../ui/SelectComCadastro';
+import { NovoServicoHost } from '../servicos/NovoServicoHost';
+import { NovoProfissionalHost } from '../servicos/NovoProfissionalHost';
+import { TurmaModal } from '../servicos/TurmaModal';
 import { activeServiceOf, serviceByValue, serviceOptions } from '../../data/catalogo';
 import { clientIdOfRecordedName, useClientOptions } from '../../data/api/clientes';
 import { getTeam, isActiveMember, useTeam } from '../../data/availability';
@@ -18,7 +21,7 @@ import type { AgendaWaitlistEntry, WaitlistPeriod } from '../../data/agenda';
 import { PERIOD_HELP, PERIOD_OPTIONS, WEEKDAY_OPTIONS, duplicateOf, preferenceLabel } from '../../data/waitlistPrefs';
 import { reviewReasonOf } from '../../data/waitlistOffer';
 import { turmaWhen, turmasOfService, useTurmas } from '../../data/turmas';
-import { isGroupService, useServices } from '../../data/servicesStore';
+import { dayWordsOf, isGroupService, useServices } from '../../data/servicesStore';
 import { alwaysAnswersText, clientIdFromName, kindOf, stoppedSentence, stoppedTitle, useContactBlocks } from '../../data/contactPreferences';
 
 /** W1 (11/11/2026, Christian, decisão 15): a preferência virou campos (dias, período, janela de datas, observação). */
@@ -101,6 +104,19 @@ export function ListaEsperaModal({ open, onClose, onSaved, editing, mode = 'novo
   /** L24c: janela Novo cliente aberta a partir de "Cadastrar cliente", com o nome digitado. */
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" e "Cadastrar profissional" abrem a janela de cadastro por cima (montada só enquanto usada). */
+  const [newSvc, setNewSvc] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const [newPro, setNewPro] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const closeNewSvc = () => {
+    setNewSvc((e) => ({ ...e, open: false }));
+    window.setTimeout(() => setNewSvc((e) => e.open ? e : { ...e, mounted: false }), 400);
+  };
+  const closeNewPro = () => {
+    setNewPro((e) => ({ ...e, open: false }));
+    window.setTimeout(() => setNewPro((e) => e.open ? e : { ...e, mounted: false }), 400);
+  };
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2c): "Cadastrar turma" abre a janela da turma por cima. */
+  const [newTurmaOpen, setNewTurmaOpen] = useState(false);
   const isEdit = mode !== 'novo' && !!editing;
 
   useEffect(() => {
@@ -110,6 +126,9 @@ export function ListaEsperaModal({ open, onClose, onSaved, editing, mode = 'novo
       setProError(undefined);
       setNewClientOpen(false);
       setNewClientName('');
+      setNewSvc({ mounted: false, open: false, typed: '' });
+      setNewPro({ mounted: false, open: false, typed: '' });
+      setNewTurmaOpen(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -121,7 +140,8 @@ export function ListaEsperaModal({ open, onClose, onSaved, editing, mode = 'novo
   };
   /** G2 (aulas em grupo; CONTRATO NOVO): serviço em grupo pode pedir uma turma (opcional). */
   useTurmas();
-  const groupService = useServices().services.find((x) => x.id === form.service && isGroupService(x));
+  const servicesList = useServices().services;
+  const groupService = servicesList.find((x) => x.id === form.service && isGroupService(x));
   const turmaOptions = groupService ? turmasOfService(groupService.id).map((t) => ({ value: t.id, label: turmaWhen(t), description: getTeam().members.find((m) => m.id === t.professionalId)?.name })) : [];
   // Escolher "Qualquer dia" limpa os dias; escolher um dia tira o "Qualquer dia".
   const setDays = (v: string | string[]) => {
@@ -195,7 +215,8 @@ export function ListaEsperaModal({ open, onClose, onSaved, editing, mode = 'novo
   return (
     <>
     <AppModal
-        open={open && !newClientOpen}
+        open={open}
+        covered={newClientOpen || newSvc.open || newPro.open || newTurmaOpen}
         onClose={onClose}
         title={mode === 'editar' ? 'Editar pedido da lista de espera' : mode === 'renovar' ? 'Voltar para a fila' : 'Adicionar à lista de espera'}
         description={
@@ -243,31 +264,39 @@ export function ListaEsperaModal({ open, onClose, onSaved, editing, mode = 'novo
             {optedOutText} {alwaysAnswersText()}
           </NoticeInline>
           }
-        <Select
+        {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" e "Cadastrar profissional" no topo da lista, só no pedido novo (como o cliente). */}
+        <SelectComCadastro
             label="Serviço"
             required
             placeholder="Escolha o serviço"
             options={serviceOptions}
             value={form.service || undefined}
             onChange={set('service')}
-            error={submitted && !form.service ? 'Escolha o serviço.' : duplicate?.kind === 'same' ? 'Este cliente já tem um pedido para este serviço.' : undefined} />
+            error={submitted && !form.service ? 'Escolha o serviço.' : duplicate?.kind === 'same' ? 'Este cliente já tem um pedido para este serviço.' : undefined}
+            createLabel="Cadastrar serviço"
+            onCreate={isEdit ? undefined : (typed) => setNewSvc({ mounted: true, open: true, typed })} />
           
-        <Select
+        <SelectComCadastro
             label="Profissional"
             options={proOptions}
             value={form.professional}
             onChange={set('professional')}
             error={proError}
-            helperText={proOptions.length === 1 ? 'Nenhum profissional ativo agora: o pedido fica para qualquer profissional.' : undefined} />
+            helperText={proOptions.length === 1 ? 'Nenhum profissional ativo agora: o pedido fica para qualquer profissional.' : undefined}
+            createLabel="Cadastrar profissional"
+            onCreate={isEdit ? undefined : (typed) => setNewPro({ mounted: true, open: true, typed })} />
           
         {groupService &&
           <div className="sm:col-span-2">
-            <Select
+            {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2c): primeira linha "Cadastrar turma" (só pedido novo). */}
+            <SelectComCadastro
               label="Turma"
               options={[{ value: '', label: 'Qualquer turma' }, ...turmaOptions]}
               value={form.turma}
               onChange={set('turma')}
-              helperText="Opcional. Com a turma, o pedido é para as aulas dela." />
+              helperText={`Opcional. Com a turma, o pedido é para ${dayWordsOf(groupService).pick('as', 'os')} ${dayWordsOf(groupService).many} dela.`}
+              createLabel="Cadastrar turma"
+              onCreate={isEdit ? undefined : () => setNewTurmaOpen(true)} />
             
           </div>
           }
@@ -329,6 +358,43 @@ export function ListaEsperaModal({ open, onClose, onSaved, editing, mode = 'novo
         initialName={newClientName}
         onSaved={(c) => setForm((f) => ({ ...f, client: c.name }))} />
       
+    {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): cadastro aberto pelos seletores; ao adicionar, volta com o item escolhido. Cancelar volta sem mudar nada. */}
+    {newSvc.mounted &&
+      <NovoServicoHost
+        open={open && newSvc.open}
+        initialName={newSvc.typed || undefined}
+        onClose={closeNewSvc}
+        onCreated={(s) => {
+          if (s.active) set('service')(s.id);
+        }} />
+
+      }
+    {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2c): a janela da turma que já existe, em criação, com o
+           serviço do pedido; ao adicionar, volta com a turma escolhida. Cancelar volta sem mudar nada. */}
+    <TurmaModal
+        open={open && newTurmaOpen}
+        onClose={() => setNewTurmaOpen(false)}
+        editing={null}
+        initialServiceId={form.service || undefined}
+        services={servicesList}
+        members={members}
+        onSaved={(t) => {
+          const s = servicesList.find((x) => x.id === t.serviceId);
+          const pro = members.find((m) => m.id === t.professionalId);
+          toast({ title: 'Turma adicionada', description: `${s?.name ?? 'Turma'}: ${turmaWhen(t).toLowerCase()}${pro ? `, com ${pro.name}` : ''}.` });
+          if (t.serviceId === form.service) set('turma')(t.id);
+        }}
+        onArchive={() => undefined} />
+      
+    {newPro.mounted &&
+      <NovoProfissionalHost
+        open={open && newPro.open}
+        initialName={newPro.typed || undefined}
+        initialServiceIds={form.service ? [form.service] : undefined}
+        onClose={closeNewPro}
+        onCreated={(m) => set('professional')(m.id)} />
+
+      }
     </>);
 
 }

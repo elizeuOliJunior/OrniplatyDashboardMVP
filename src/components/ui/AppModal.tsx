@@ -14,6 +14,21 @@
  *    bordas. Um `ModalActions` (ou um bloco que contém um) não é embrulhado de novo: ocupa a largura toda, para a ação
  *    `start` ficar na borda esquerda. Qualquer outro rodapé (ex.: `ModalActions equal`, rodapés feitos à mão) continua
  *    como antes: largura toda no celular e largura do conteúdo no computador.
+ * CONTRATO NOVO (janela de tamanho único, 23/11/2026; lote SC1b): `steadyHeight` (desligada por padrão) dá à janela UMA
+ *    altura fixa, a mesma em todas as abas: a máxima que a janela já permite na tela, com teto de 720 px. Título e
+ *    rodapé ficam parados e só o miolo rola; texto de motivo ou aviso no rodapé tira espaço do miolo, não muda a altura.
+ *    Ligada só em "Novo/Editar serviço" e "Novo/Editar profissional". OPÇÃO LOCAL DO PAINEL: ainda não existe no `Modal`
+ *    do design system (pendência para a próxima publicação do DS).
+ * CONTRATO NOVO (janela coberta, 23/11/2026; lote SC2c): `covered` (desligada por padrão) esconde a janela enquanto outra
+ *    abre por cima dela (ex.: "Cadastrar cliente", "Cadastrar serviço", "Vender pacote", "Cadastrar turma") SEM esquecer
+ *    o estado de quando ela abriu. Antes, quem usava passava `open={false}` e, ao voltar, a janela tirava uma foto nova do
+ *    formulário já preenchido: o aviso de alterações não salvas sumia. Com `covered`, a foto de abertura volta junto com a
+ *    janela, e o que foi preenchido antes (ou escolhido no cadastro) continua contando como alteração. Sem `covered`, nada
+ *    muda. Local do Painel, ainda não existe no design system.
+ * CONTRATO NOVO (foco no primeiro campo, 23/11/2026; lote SC3): `initialFocus="field"` (padrão `"first"`, como sempre) abre a
+ *    janela com o cursor no primeiro campo de texto ou lista do miolo, em vez do primeiro botão (o X). Sem campo, faz o de
+ *    sempre. Título, leitor de tela, Esc, Tab preso e foco de volta ao fechar não mudam. Ligada só em "Nova área de
+ *    atuação". Local do Painel, ainda não existe no design system.
  */
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -67,6 +82,21 @@ export interface AppModalProps {
   anchor?: 'center' | 'top';
   /** L13 (DS 4.9, `Modal dismissToasts`): ao abrir, fecha os toasts abertos. Padrão `true` no Painel. */
   dismissToasts?: boolean;
+  /**
+   * CONTRATO NOVO (janela de tamanho único, 23/11/2026): altura fixa, igual em todas as abas (máxima da tela, teto 720 px);
+   * só o miolo rola. Padrão `false`. Local do Painel, ainda não existe no design system.
+   */
+  steadyHeight?: boolean;
+  /**
+   * CONTRATO NOVO (janela coberta, 23/11/2026; lote SC2c): `true` = a janela fica escondida enquanto outra está aberta por
+   * cima dela, e volta comparando com o estado de quando abriu (o aviso de alterações não salvas não zera). Padrão `false`.
+   */
+  covered?: boolean;
+  /**
+   * CONTRATO NOVO (foco no primeiro campo, 23/11/2026; lote SC3): `field` = ao abrir, o cursor vai para o primeiro campo do
+   * miolo (input, textarea ou select ativo); sem campo, o primeiro item focável, como antes. Padrão `first` (o de sempre).
+   */
+  initialFocus?: 'first' | 'field';
   className?: string;
 }
 
@@ -75,6 +105,9 @@ const sizeClasses: Record<AppModalSize, string> = {
   md: 'max-w-lg',
   lg: 'max-w-2xl'
 };
+
+/** SC3 (`initialFocus="field"`): campos que recebem o cursor ao abrir. */
+const FIELD_FOCUS = 'input:not([disabled]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea:not([disabled]), select:not([disabled])';
 
 const FOCUSABLE =
 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -150,8 +183,15 @@ export function AppModal({
   dirtyValue,
   anchor = 'center',
   dismissToasts = true,
+  steadyHeight = false,
+  covered = false,
+  initialFocus = 'first',
   className
 }: AppModalProps) {
+  // CONTRATO NOVO (janela coberta, SC2c): `shown` = aberta e sem outra janela por cima. Sem `covered`, é o mesmo que `open`.
+  const shown = open && !covered;
+  /** SC2c: foto do formulário guardada enquanto a janela está coberta (volta quando ela reaparece). */
+  const heldBaseline = useRef<string | null>(null);
   const titleId = useId();
   const descId = useId();
   const guardId = useId();
@@ -172,31 +212,40 @@ export function AppModal({
 
   // L13 (DS 4.9): abrir a janela fecha os toasts abertos (eles ficavam por cima do título).
   useEffect(() => {
-    if (open && dismissToasts) dismissAllToasts();
-  }, [open, dismissToasts]);
+    if (shown && dismissToasts) dismissAllToasts();
+  }, [shown, dismissToasts]);
 
   const dirtyNow = useCallback(() => {
-    if (!open || !unsavedGuard || baseline.current === null || !bodyRef.current) return false;
+    if (!shown || !unsavedGuard || baseline.current === null || !bodyRef.current) return false;
     return snapshot() !== baseline.current;
-  }, [open, unsavedGuard, snapshot]);
+  }, [shown, unsavedGuard, snapshot]);
 
   // Foto do formulário logo depois da abertura (o modal já inicializou os campos) e comparação periódica
+  // SC2c: ao ser coberta, guarda a foto; ao reaparecer (ainda aberta), usa a foto guardada em vez de tirar outra.
   useEffect(() => {
+    if (!open) heldBaseline.current = null;else
+    if (covered && baseline.current !== null) heldBaseline.current = baseline.current;
     baseline.current = null;
     setChanged(false);
-    if (!open || !unsavedGuard) return;
-    const t = window.setTimeout(() => {
+    if (!shown || !unsavedGuard) return;
+    const held = heldBaseline.current;
+    heldBaseline.current = null;
+    if (held !== null) baseline.current = held;
+    const t =
+    held !== null ?
+    undefined :
+    window.setTimeout(() => {
       if (bodyRef.current) baseline.current = snapshot();
     }, 300);
     const iv = window.setInterval(() => setChanged(dirtyNow()), 250);
     return () => {
-      window.clearTimeout(t);
+      if (t !== undefined) window.clearTimeout(t);
       window.clearInterval(iv);
     };
-  }, [open, unsavedGuard, dirtyNow]);
+  }, [shown, open, covered, unsavedGuard, dirtyNow]);
 
   // Enquanto há alterações, menu/abas/Voltar do navegador também passam pelo aviso
-  useDirtyForm(guardId, open && changed, { discard: () => onCloseRef.current() });
+  useDirtyForm(guardId, shown && changed, { discard: () => onCloseRef.current() });
 
   /** Fechar pelo X, pelo Esc, pelo fundo ou por um botão de dispensar: pergunta antes se há alterações. */
   const requestClose = () => {
@@ -207,9 +256,11 @@ export function AppModal({
   requestCloseRef.current = requestClose;
   const hideCloseRef = useRef(hideCloseButton);
   hideCloseRef.current = hideCloseButton;
+  const initialFocusRef = useRef(initialFocus);
+  initialFocusRef.current = initialFocus;
 
   useEffect(() => {
-    if (!open) return;
+    if (!shown) return;
     previousFocus.current = document.activeElement as HTMLElement | null;
     const stackToken = {};
     openModalStack.push(stackToken);
@@ -226,7 +277,9 @@ export function AppModal({
     root?.addEventListener('touchmove', blockScroll, { passive: false });
 
     const raf = requestAnimationFrame(() => {
-      const first = panelRef.current?.querySelector<HTMLElement>(FOCUSABLE);
+      // SC3: com `initialFocus="field"`, o primeiro campo do miolo; sem campo (ou padrão), o primeiro focável, como antes.
+      const field = initialFocusRef.current === 'field' ? bodyRef.current?.querySelector<HTMLElement>(FIELD_FOCUS) : null;
+      const first = field ?? panelRef.current?.querySelector<HTMLElement>(FOCUSABLE);
       (first ?? panelRef.current)?.focus();
     });
 
@@ -267,11 +320,11 @@ export function AppModal({
       root?.removeEventListener('touchmove', blockScroll);
       previousFocus.current?.focus?.();
     };
-  }, [open]);
+  }, [shown]);
 
   // L13: `anchor="top"` = mesmas medidas do `Modal anchor="top"` do DS no computador (64px do topo, altura até 100vh-5rem).
   const top = anchor === 'top';
-  const body = open &&
+  const body = shown &&
   <div
     key="app-modal-root"
     ref={rootRef}
@@ -301,6 +354,9 @@ export function AppModal({
       className={twMerge(
         'relative flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-card bg-white shadow-xl ring-1 ring-focus-ring/5 focus:outline-none',
         top && 'sm:max-h-[calc(100vh-5rem)]',
+        // CONTRATO NOVO (janela de tamanho único, 23/11/2026): mesma altura máxima de sempre, teto 720 px.
+        steadyHeight && 'h-[min(720px,calc(100vh-2rem))]',
+        steadyHeight && top && 'sm:h-[min(720px,calc(100vh-5rem))]',
         sizeClasses[size],
         className
       )}
@@ -337,7 +393,17 @@ export function AppModal({
         }
             </div>
             {children &&
-      <div ref={bodyRef} className="flex-1 overflow-y-auto overscroll-contain px-6 pb-6 text-sm text-text-secondary">{children}</div>
+      <div
+        ref={bodyRef}
+        className={twMerge(
+          'flex-1 overflow-y-auto overscroll-contain px-6 pb-6 text-sm text-text-secondary',
+          // CONTRATO NOVO (janela de tamanho único, 23/11/2026): o espaço da barra de rolagem fica reservado, para o
+          // conteúdo não andar para o lado quando uma aba rola e a outra não.
+          steadyHeight && 'min-h-0 [scrollbar-gutter:stable]'
+        )}>
+        
+                {children}
+              </div>
       }
             {footer &&
       <div

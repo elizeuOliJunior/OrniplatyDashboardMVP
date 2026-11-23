@@ -9,6 +9,9 @@ import { DateField } from '../ui/DateField';
 import { SegmentedControl } from '../Card';
 import { ClientSelect } from '../client/ClientSelect';
 import { NovoClienteModal } from '../modals/NovoClienteModal';
+import { SelectComCadastro } from '../ui/SelectComCadastro';
+import { NovoServicoHost } from '../servicos/NovoServicoHost';
+import { NovoProfissionalHost } from '../servicos/NovoProfissionalHost';
 import { createPackage } from '../../data/api/pacotes';
 import type { PackagePaymentPlan } from '../../data/api/pacotes';
 import { allClientsForSelect, clientIdOfRecordedName } from '../../data/api/clientes';
@@ -70,6 +73,17 @@ export function VendaDePacoteModal({
   /** L24c: janela Novo cliente aberta a partir de "Cadastrar cliente", com o nome digitado. */
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" e "Cadastrar profissional" abrem a janela de cadastro por cima (montada só enquanto usada). */
+  const [newSvc, setNewSvc] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const [newPro, setNewPro] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const closeNewSvc = () => {
+    setNewSvc((e) => ({ ...e, open: false }));
+    window.setTimeout(() => setNewSvc((e) => e.open ? e : { ...e, mounted: false }), 400);
+  };
+  const closeNewPro = () => {
+    setNewPro((e) => ({ ...e, open: false }));
+    window.setTimeout(() => setNewPro((e) => e.open ? e : { ...e, mounted: false }), 400);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -89,6 +103,8 @@ export function VendaDePacoteModal({
     setTocou(false);
     setNewClientOpen(false);
     setNewClientName('');
+    setNewSvc({ mounted: false, open: false, typed: '' });
+    setNewPro({ mounted: false, open: false, typed: '' });
   }, [open, clientePreSelecionadoId, servicoPreSelecionadoId]);
 
   // G3: só serviços ATIVOS podem ser vendidos (arquivado sai da escolha; contratos e históricos já existentes não mudam).
@@ -157,7 +173,8 @@ export function VendaDePacoteModal({
   return (
     <>
     <AppModal
-        open={open && !newClientOpen}
+        open={open}
+        covered={newClientOpen || newSvc.open || newPro.open}
         onClose={onClose}
         size="lg"
         title="Vender pacote"
@@ -195,22 +212,27 @@ export function VendaDePacoteModal({
               }} />
             
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Select
+            {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" e "Cadastrar profissional" no topo da lista. */}
+            <SelectComCadastro
                 label="Serviço"
                 placeholder="Selecione"
                 options={catalogServices.filter((s) => activeServiceIds.has(s.value) || s.value === servicoId).map((s) => ({ value: s.value, label: s.label, description: `${formatarValor(s.price * 100)} por sessão` }))}
                 value={servicoId || undefined}
                 onChange={setServicoId}
-                helperText="O pacote cobre este serviço. A sessão só é baixada quando ele é realizado." />
+                helperText="O pacote cobre este serviço. A sessão só é baixada quando ele é realizado."
+                createLabel="Cadastrar serviço"
+                onCreate={(typed) => setNewSvc({ mounted: true, open: true, typed })} />
               
-            <Select
+            <SelectComCadastro
                 label="Profissional preferido (opcional)"
                 placeholder="Sem preferência"
                 options={[{ value: '', label: 'Sem preferência' }, ...profissionais.map((m) => ({ value: m.id, label: m.name, color: m.color }))]}
                 value={profissionalId}
                 onChange={setProfissionalId}
                 disabled={!servicoId}
-                helperText={servicoId ? TEXTO_PREFERENCIA_NAO_E_EXECUTOR : 'Escolha o serviço primeiro — a lista mostra quem atende esse serviço.'} />
+                helperText={servicoId ? TEXTO_PREFERENCIA_NAO_E_EXECUTOR : 'Escolha o serviço primeiro — a lista mostra quem atende esse serviço.'}
+                createLabel="Cadastrar profissional"
+                onCreate={(typed) => setNewPro({ mounted: true, open: true, typed })} />
               
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-[7rem_1fr_1fr]">
@@ -318,6 +340,26 @@ export function VendaDePacoteModal({
           if (id) setClienteId(id);
         }} />
       
+    {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): cadastro aberto pelos seletores; ao adicionar, volta com o item escolhido. Cancelar volta sem mudar nada. */}
+    {newSvc.mounted &&
+      <NovoServicoHost
+        open={open && newSvc.open}
+        initialName={newSvc.typed || undefined}
+        onClose={closeNewSvc}
+        onCreated={(s) => {
+          if (s.active) setServicoId(s.id);
+        }} />
+
+      }
+    {newPro.mounted &&
+      <NovoProfissionalHost
+        open={open && newPro.open}
+        initialName={newPro.typed || undefined}
+        initialServiceIds={servicoId ? [servicoId] : undefined}
+        onClose={closeNewPro}
+        onCreated={(m) => setProfissionalId(m.id)} />
+
+      }
     </>);
 
 }

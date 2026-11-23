@@ -1,5 +1,5 @@
 import React from 'react';
-import { Select } from '../Select';
+import { SelectComCadastro } from '../ui/SelectComCadastro';
 import { clientIdOfRecordedName, clientPhone, useClientsVersion } from '../../data/api/clientes';
 
 /**
@@ -9,6 +9,7 @@ import { clientIdOfRecordedName, clientPhone, useClientsVersion } from '../../da
  * cliente" é a primeira linha da lista e recebe o que foi digitado (quem usa abre a janela Novo cliente com esse nome).
  * Sem `onCreate`, a linha "Cadastrar cliente" não aparece (ex.: Remarcar, Editar pedido). Só monta a peça do DS: nenhum
  * estilo próprio. O valor de cada opção continua o de antes em cada janela (nome na agenda e na lista de espera; id no pacote).
+ * SC2a (23/11/2026): a linha de cadastro vem da peça única `SelectComCadastro` (components/ui); por fora, nada mudou.
  */
 export const CLIENT_FIELD_LABEL = 'Cliente';
 export const CLIENT_FIELD_PLACEHOLDER = 'Digite o nome do cliente';
@@ -44,7 +45,7 @@ export function ClientSelect({
     return phone ? { ...o, description: phone } : o;
   });
   return (
-    <Select
+    <SelectComCadastro
       label={CLIENT_FIELD_LABEL}
       placeholder={CLIENT_FIELD_PLACEHOLDER}
       searchable
@@ -56,7 +57,8 @@ export function ClientSelect({
       onChange={onChange}
       error={error}
       helperText={helperText}
-      leadingAction={onCreate ? { label: CLIENT_CREATE_LABEL, onSelect: (typed: string) => onCreate(typed.trim()) } : undefined} />);
+      createLabel={CLIENT_CREATE_LABEL}
+      onCreate={onCreate} />);
 
 
 }

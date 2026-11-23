@@ -89,10 +89,11 @@ const ITEMS: LegendItem[] = [
  * grupo ativo, como a aba Turmas.
  */
 const AULA_ITEM: LegendItem = {
-  label: 'Aula em grupo',
+  // G5 (aulas em grupo, 23/11/2026): texto neutro (vale para todos os serviços do tipo Turma).
+  label: 'Turma',
   swatch: <span aria-hidden="true" className={`${swatch} border-l-4 border-primary bg-primary-soft`} />,
-  title: 'Aula em grupo',
-  text: 'Uma aula aparece como um cartão só, na coluna do profissional, com quantas vagas estão ocupadas (ex.: 3 de 4) ou “Lotada”. Clique no cartão para ver os clientes, fazer a chamada, mudar o horário ou cancelar a aula.'
+  title: 'Turma',
+  text: 'Cada dia de uma turma aparece como um cartão só, na coluna do profissional, com quantas vagas estão ocupadas (ex.: 3 de 4) ou “Lotada”. Clique no cartão para ver os clientes, fazer a chamada, mudar o horário ou cancelar aquele dia.'
 };
 
 /**

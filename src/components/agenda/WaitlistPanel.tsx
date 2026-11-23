@@ -23,6 +23,7 @@ import { agendaProfessionalOf, clinicDay, useTeam } from '../../data/availabilit
 import { restoreExpired, setWaitlist, useAgendaData } from '../../data/agendaLive';
 import { NOW, TODAY_ISO } from '../../data/agendaStore';
 import { useServices } from '../../data/servicesStore';
+import { getTurmas, turmaWhen, useTurmas } from '../../data/turmas';
 import { automacoesStore } from '../../data/automacoes';
 import { useSavedStore } from '../../data/iaConfigStore';
 import { ensureConversation, useConversations } from '../../data/conversasThreads';
@@ -114,6 +115,8 @@ export function WaitlistPanel({ onSchedule }: WaitlistPanelProps) {
   useConversations();
   // Revisão v3: arquivar, renomear ou mudar "Quem faz" em Serviços e equipe recalcula quem pode receber oferta na hora.
   useServices();
+  // G6b (CONTRATO NOVO, aulas em grupo, 23/11/2026): o pedido mostra a turma pedida ("Sexta, 08:00").
+  useTurmas();
   // Shared with Conversas (the client summary shows the same list)
   const { waitlist: entries, appointments, expired } = useAgendaData();
   const setEntries = setWaitlist;
@@ -169,6 +172,12 @@ export function WaitlistPanel({ onSchedule }: WaitlistPanelProps) {
     toast({ title: 'Removido da lista de espera', description: entry.clientName, tone: 'info' });
   };
 
+  /** G6b (CONTRATO NOVO): turma pedida, quando o pedido tem uma (gravada pela janela da lista de espera desde o G2). */
+  const turmaOfEntry = (entry: AgendaWaitlistEntry) => {
+    const id = (entry as AgendaWaitlistEntry & {turmaId?: string;}).turmaId;
+    return id ? getTurmas().turmas.find((t) => t.id === id) : undefined;
+  };
+
   const renderEntry = (entry: AgendaWaitlistEntry, i: number) => {
     const block = blockedOf(entry.clientName);
     const review = reviewReasonOf(entry);
@@ -190,7 +199,8 @@ export function WaitlistPanel({ onSchedule }: WaitlistPanelProps) {
               </span>
             }
             <span className="mt-0.5 block text-sm text-text-secondary">
-              {entry.service} · {entry.professional}
+              {entry.service}
+              {turmaOfEntry(entry) ? ` · ${turmaWhen(turmaOfEntry(entry)!)}` : ''} · {entry.professional}
             </span>
             <span className="mt-0.5 block text-sm text-text-secondary">Prefere: {preferenceLabel(entry)}</span>
             {review && <span className="mt-0.5 block text-xs font-semibold text-warning">Não recebe ofertas de vaga até alguém revisar: {review}.</span>}

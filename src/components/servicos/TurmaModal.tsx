@@ -20,11 +20,19 @@ import { checkAvailability, isActiveMember } from '../../data/availability';
 import { getAgendaState } from '../../data/agendaLive';
 import { mediumDayLabel } from '../../data/agendaStore';
 import { WEEKDAY_LONG, WEEKDAY_SHORT, dmy, fromMin, isStepTime, toMin } from '../../data/schedule';
-import { isGroupService } from '../../data/servicesStore';
+import { dayWordsOf, isGroupService } from '../../data/servicesStore';
 import type { ServiceItem } from '../../data/servicesStore';
 import type { TeamMember } from '../../data/equipeFuncionamento';
-import { getTurmas, newEnrollmentId, newTurmaId, nextClassDates, occupyingOf, saveTurma, turmaWhen } from '../../data/turmas';
+import { dateFullByAvulso, getTurmas, newEnrollmentId, newTurmaId, nextClassDates, saveTurma, seatsOnDate, turmaWhen } from '../../data/turmas';
 import type { Enrollment, Turma, Weekday } from '../../data/turmas';
+import { freeCreditsFor } from '../../data/aulas';
+import { dataBR } from '../../data/fichaLib';
+import { useMakeupCreditsVersion } from '../../data/makeupCredits';
+// CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2a)
+import { SelectComCadastro, sameName, useSameNameNotice } from '../ui/SelectComCadastro';
+import { NovoServicoHost } from './NovoServicoHost';
+import { NovoProfissionalHost } from './NovoProfissionalHost';
+import { getServices } from '../../data/servicesStore';
 
 type Props = {
   open: boolean;
@@ -34,10 +42,13 @@ type Props = {
   members: TeamMember[];
   onSaved: (t: Turma, isNew: boolean) => void;
   onArchive: (t: Turma, active: boolean) => void;
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2c): turma nova já com este serviço (ex.: Lista de espera › "Cadastrar turma"). */
+  initialServiceId?: string;
 };
 
 type Draft = {serviceId: string;professionalId: string;weekdays: Weekday[];startTime: string;enrollments: Enrollment[];};
-type AddPay = '' | 'pacote' | 'vender' | 'por-aula';
+/** G3 (CONTRATO NOVO, aulas em grupo): `credito` = avulso que paga com crédito de reposição. */
+type AddPay = '' | 'pacote' | 'vender' | 'por-aula' | 'credito';
 type AddForm = {clientId: string;kind: 'fixo' | 'avulso';date: string;pay: AddPay;packageId: string;};
 const blankAdd = (): AddForm => ({ clientId: '', kind: 'fixo', date: '', pay: '', packageId: '' });
 
@@ -52,11 +63,12 @@ const SECTION_HELP = 'mt-0.5 text-xs text-text-secondary';
  * a lista de espera da turma chega no lote G2. Fora do horário: o aviso usa a MESMA regra da agenda (`checkAvailability`,
  * só configuração) e não impede salvar.
  */
-export function TurmaModal({ open, onClose, editing, services, members, onSaved, onArchive }: Props) {
+export function TurmaModal({ open, onClose, editing, services, members, onSaved, onArchive, initialServiceId }: Props) {
   useClientsVersion();
   useBackendVersion();
+  useMakeupCreditsVersion();
   const groupServices = services.filter((s) => isGroupService(s) && (s.active || s.id === editing?.serviceId));
-  const blank = (): Draft => ({ serviceId: groupServices.find((s) => s.active)?.id ?? '', professionalId: '', weekdays: [], startTime: '', enrollments: [] });
+  const blank = (): Draft => ({ serviceId: (groupServices.find((s) => s.active && s.id === initialServiceId) ?? groupServices.find((s) => s.active))?.id ?? '', professionalId: '', weekdays: [], startTime: '', enrollments: [] });
   const [draft, setDraft] = useState<Draft>(blank);
   const [submitted, setSubmitted] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -66,6 +78,13 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
   const [saleOpen, setSaleOpen] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
+  /**
+   * CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" (abre já como Turma) e "Cadastrar profissional"
+   * (já marcado no serviço escolhido, para aparecer na lista "Só quem faz este serviço") por cima desta janela.
+   */
+  const [newService, setNewService] = useState<{open: boolean;typed: string;}>({ open: false, typed: '' });
+  const [newPro, setNewPro] = useState<{open: boolean;typed: string;}>({ open: false, typed: '' });
+  const sameNameNotice = useSameNameNotice();
 
   useEffect(() => {
     if (!open) return;
@@ -80,6 +99,8 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
     setAdd(blankAdd());
     setRemoving(null);
     setConfirmArchive(false);
+    setNewService({ open: false, typed: '' });
+    setNewPro({ open: false, typed: '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -87,8 +108,13 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
   const capacity = service?.group?.capacity ?? 0;
   const duration = service?.durationMin ?? 0;
   const pros = members.filter((m) => isActiveMember(m) && !!service?.professionalIds.includes(m.id) || m.id === draft.professionalId);
-  const occupied = occupyingOf(draft.enrollments).length;
+  // G5 (D; CONTRATO NOVO, aulas em grupo): na turma contam só os fixos; o avulso conta só na data dele.
+  const occupied = draft.enrollments.filter((e) => e.kind === 'fixo').length;
   const full = capacity > 0 && occupied >= capacity;
+  /** G5 (B; CONTRATO NOVO): a palavra de cada dia desta turma ("esta aula" / "este treino"). */
+  const w = dayWordsOf(service);
+  const fullByAvulso = dateFullByAvulso(draft.enrollments, capacity);
+  const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
   const endTime = isStepTime(draft.startTime) && duration ? fromMin(toMin(draft.startTime) + duration) : '';
 
   const errors = {
@@ -137,25 +163,36 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
   map((c) => ({ value: c.id, label: c.name }));
   const packages = add.clientId && draft.serviceId ? listPackages({ client_id: add.clientId }).filter((p) => p.service_id === draft.serviceId && p.status === 'active' && p.saldo > 0) : [];
   const dateOptions = nextClassDates(draft.weekdays, 8).map((iso) => ({ value: iso, label: mediumDayLabel(iso) }));
+  // G3 (C): reposições que o cliente ainda pode prometer a esta data, menos as prometidas neste rascunho (ainda não salvo).
+  const savedIds = new Set(getTurmas().enrollments.map((e) => e.id));
+  const draftPromised = draft.enrollments.filter((e) => !savedIds.has(e.id) && e.clientId === add.clientId && e.payment === 'credito').length;
+  const credits = add.clientId && draft.serviceId && add.date ? freeCreditsFor(add.clientId, draft.serviceId, add.date) : { free: 0, next: null };
+  const creditFree = Math.max(0, credits.free - draftPromised);
   const addIssue = !add.clientId ?
   'Escolha o cliente.' :
   add.kind === 'avulso' && !add.date ?
-  'Escolha a data da aula.' :
+  `Escolha a data ${w.ofThe}.` :
   add.kind === 'avulso' && draft.enrollments.some((e) => e.clientId === add.clientId && e.kind === 'avulso' && e.date === add.date) ?
-  'Este cliente já está nesta aula.' :
-  add.kind === 'fixo' && !add.pay ?
+  `Este cliente já está ${w.in}.` :
+  add.kind === 'fixo' && fullByAvulso ?
+  `No dia ${dm(fullByAvulso)} esta turma já está cheia com um cliente avulso.` :
+  add.kind === 'avulso' && capacity > 0 && seatsOnDate(draft.enrollments, add.date) >= capacity ?
+  `No dia ${dm(add.date)} esta turma já está cheia.` :
+  !add.pay ?
   'Escolha como o cliente paga.' :
   add.kind === 'fixo' && add.pay === 'vender' ?
   'Venda o pacote ou escolha outra forma de pagar.' :
-  add.kind === 'fixo' && add.pay === 'pacote' && !packages.some((p) => p.id === add.packageId) ?
+  add.pay === 'pacote' && !packages.some((p) => p.id === add.packageId) ?
   'Escolha o pacote.' :
   null;
   // Pacote único: já vem escolhido. Cliente trocado: a escolha do pacote recomeça.
   useEffect(() => {
     if (add.pay === 'pacote' && packages.length === 1 && add.packageId !== packages[0].id) setAdd((a) => ({ ...a, packageId: packages[0].id }));
     if (add.pay === 'pacote' && packages.length === 0) setAdd((a) => ({ ...a, pay: '', packageId: '' }));
+    if (add.pay === 'credito' && (add.kind !== 'avulso' || creditFree === 0)) setAdd((a) => ({ ...a, pay: '' }));
+    if (add.pay === 'vender' && add.kind === 'avulso') setAdd((a) => ({ ...a, pay: '' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [add.pay, add.clientId, packages.length]);
+  }, [add.pay, add.clientId, add.kind, packages.length, creditFree]);
 
   const confirmAdd = () => {
     if (addIssue || full) return;
@@ -165,8 +202,9 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
       clientId: add.clientId,
       kind: add.kind,
       ...(add.kind === 'avulso' ? { date: add.date } : {}),
-      payment: add.kind === 'fixo' && add.pay === 'pacote' ? 'pacote' : 'por-aula',
-      packageId: add.kind === 'fixo' && add.pay === 'pacote' ? add.packageId : null
+      // G3 (C): o avulso também diz como paga (reposição, pacote ou por aula).
+      payment: add.pay === 'pacote' ? 'pacote' : add.kind === 'avulso' && add.pay === 'credito' ? 'credito' : 'por-aula',
+      packageId: add.pay === 'pacote' ? add.packageId : null
     };
     setD('enrollments', [...draft.enrollments, e]);
     setAdd(blankAdd());
@@ -184,11 +222,20 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
 
   const nameOf = (id: string) => clientById(id)?.name ?? 'Cliente removido';
   const payText = (e: Enrollment) => {
-    if (e.payment !== 'pacote') return 'Paga por aula';
+    if (e.payment === 'credito') return 'Reposição';
+    if (e.payment !== 'pacote') return `Paga por ${w.one}`;
     const p = listPackages({ client_id: e.clientId }).find((x) => x.id === e.packageId);
     return p ? `Pacote · ${textoDisponiveis(p)}` : 'Pacote';
   };
   const sortedEnrollments = [...draft.enrollments].sort((a, b) => Number(a.kind === 'avulso') - Number(b.kind === 'avulso') || (a.date ?? '').localeCompare(b.date ?? '') || nameOf(a.clientId).localeCompare(nameOf(b.clientId)));
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): listas e escolha do serviço, iguais às de antes. */
+  const serviceOptions = groupServices.map((s) => ({ value: s.id, label: s.name, description: `${s.durationMin} min · ${s.group?.capacity ?? 0} vagas` }));
+  const proOptions = pros.map((m) => ({ value: m.id, label: m.name, color: m.color }));
+  const pickService = (v: string) =>
+  setDraft((d) => {
+    const next = getServices().services.find((s) => s.id === v);
+    return { ...d, serviceId: v, professionalId: next?.professionalIds.includes(d.professionalId) ? d.professionalId : '' };
+  });
   const title = editing ? `Turma de ${service?.name ?? 'serviço'}` : 'Nova turma';
 
   return (
@@ -224,33 +271,46 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
               <h3 id="turma-quando" className={SECTION_TITLE}>
                 Quando
               </h3>
-              <p className={SECTION_HELP}>O fim de cada aula segue a duração do serviço.</p>
+              <p className={SECTION_HELP}>O fim de cada {w.one} segue a duração do serviço.</p>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Select
+              {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): primeira linha "Cadastrar serviço". */}
+              <SelectComCadastro
                 label="Serviço"
                 required
                 placeholder="Escolha o serviço"
-                options={groupServices.map((s) => ({ value: s.id, label: s.name, description: `${s.durationMin} min · ${s.group?.capacity ?? 0} vagas` }))}
+                options={serviceOptions}
                 value={draft.serviceId || undefined}
-                onChange={(v) =>
-                setDraft((d) => {
-                  const next = services.find((s) => s.id === v);
-                  return { ...d, serviceId: v, professionalId: next?.professionalIds.includes(d.professionalId) ? d.professionalId : '' };
-                })
-                }
-                error={err('service')} />
+                onChange={pickService}
+                error={err('service')}
+                createLabel="Cadastrar serviço"
+                onCreate={(typed) => {
+                  const same = sameName(serviceOptions, typed);
+                  if (same) {
+                    pickService(same.value);
+                    sameNameNotice(same.label);
+                  } else setNewService({ open: true, typed });
+                }} />
               
-              <Select
+              {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): primeira linha "Cadastrar profissional". */}
+              <SelectComCadastro
                 label="Profissional"
                 required
                 placeholder={service ? 'Escolha o profissional' : 'Escolha o serviço antes'}
                 disabled={!service}
-                options={pros.map((m) => ({ value: m.id, label: m.name, color: m.color }))}
+                options={proOptions}
                 value={draft.professionalId || undefined}
                 onChange={(v) => setD('professionalId', v)}
                 error={err('pro')}
-                helperText={service ? 'Só quem faz este serviço.' : undefined} />
+                helperText={service ? 'Só quem faz este serviço.' : undefined}
+                createLabel="Cadastrar profissional"
+                onCreate={(typed) => {
+                  const same = sameName(proOptions, typed);
+                  if (same) {
+                    setD('professionalId', same.value);
+                    sameNameNotice(same.label);
+                  } else setNewPro({ open: true, typed });
+                }} />
               
               <div className="sm:col-span-2">
                 {/* Mesmo padrão dos dias da semana da Pausa coletiva (Funcionamento). */}
@@ -283,7 +343,7 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
             }
             {overlapping.length > 0 &&
             <ConflictNotice
-              title={`${overlapping.length} ${overlapping.length === 1 ? 'agendamento fica' : 'agendamentos ficam'} no horário das próximas aulas`}
+              title={`${overlapping.length} ${overlapping.length === 1 ? 'agendamento fica' : 'agendamentos ficam'} no horário ${w.pick('das próximas', 'dos próximos')} ${w.many}`}
               items={overlapping}
               footnote="Nada será cancelado nem movido. Remarque esses agendamentos na Agenda ou escolha outro horário para a turma." />
 
@@ -345,15 +405,62 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
                 size="sm"
                 columns={2}
                 value={add.kind}
-                onChange={(v) => setAdd((a) => ({ ...a, kind: v === 'avulso' ? 'avulso' : 'fixo' }))}
+                onChange={(v) => setAdd((a) => ({ ...a, kind: v === 'avulso' ? 'avulso' : 'fixo', pay: '', packageId: '' }))}
                 options={[
                 { value: 'fixo', title: 'Fixo' },
                 { value: 'avulso', title: 'Avulso' }]
                 }
-                helperText={add.kind === 'fixo' ? 'Vem em todas as aulas da turma.' : 'Vem em uma aula só.'} />
+                helperText={add.kind === 'fixo' ? `Vem em ${w.pick('todas as', 'todos os')} ${w.many} da turma.` : `Vem em ${w.a} só.`} />
               
                 {add.kind === 'avulso' &&
-              <Select label="Data da aula" required placeholder="Escolha a data" options={dateOptions} value={add.date || undefined} onChange={(v) => setAdd((a) => ({ ...a, date: v }))} helperText="Só os dias desta turma." />
+              <Select label={`Data ${w.ofThe}`} required placeholder="Escolha a data" options={dateOptions} value={add.date || undefined} onChange={(v) => setAdd((a) => ({ ...a, date: v }))} helperText="Só os dias desta turma." />
+              }
+                {add.kind === 'avulso' &&
+              <>
+                    {/* G3 (C, CONTRATO NOVO): mesma pergunta da janela da aula; opção sem saldo fica desligada com o motivo. */}
+                    <ChoiceCards
+                  label={`Como este cliente paga ${w.this}?`}
+                  columns={1}
+                  value={add.pay}
+                  onChange={(v) => setAdd((a) => ({ ...a, pay: v as AddPay, packageId: '' }))}
+                  options={[
+                  {
+                    value: 'credito',
+                    title: 'Crédito de reposição',
+                    description: !add.clientId ?
+                    'Escolha o cliente primeiro.' :
+                    !add.date ?
+                    `Escolha a data ${w.ofThe} primeiro.` :
+                    creditFree > 0 && credits.next ?
+                    `Usa uma reposição de ${service?.name ?? 'este serviço'} (vence em ${dataBR(credits.next.expiresIso)}).` :
+                    `Sem reposição válida de ${service?.name ?? 'este serviço'}.`,
+                    disabled: creditFree === 0
+                  },
+                  {
+                    value: 'pacote',
+                    title: 'Pacote',
+                    description: !add.clientId ?
+                    'Escolha o cliente primeiro.' :
+                    packages.length ?
+                    `Usa uma sessão do pacote de ${service?.name ?? 'este serviço'}.` :
+                    `Sem pacote de ${service?.name ?? 'este serviço'} com sessões.`,
+                    disabled: !packages.length
+                  },
+                  { value: 'por-aula', title: `Paga por ${w.one}`, description: `${w.This} é ${w.pick('cobrada separada', 'cobrado separado')}.` }]
+                  } />
+                
+                    {add.pay === 'pacote' && packages.length > 1 &&
+                <Select
+                  label="Pacote"
+                  required
+                  placeholder="Escolha o pacote"
+                  options={packages.map((p) => ({ value: p.id, label: `Pacote de ${p.service_name_snapshot}`, description: textoDisponiveis(p) }))}
+                  value={add.packageId || undefined}
+                  onChange={(v) => setAdd((a) => ({ ...a, packageId: v }))} />
+
+                }
+                    {add.pay === 'pacote' && packages.length === 1 && <p className="text-sm text-text-secondary">Pacote de {packages[0].service_name_snapshot} · {textoDisponiveis(packages[0])}</p>}
+                  </>
               }
                 {add.kind === 'fixo' &&
               <>
@@ -374,7 +481,7 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
                     disabled: !packages.length
                   },
                   { value: 'vender', title: 'Vender pacote agora', description: 'Abre a venda de pacote com o cliente e o serviço já escolhidos.' },
-                  { value: 'por-aula', title: 'Paga por aula', description: 'Cada aula é cobrada separada.' }]
+                  { value: 'por-aula', title: `Paga por ${w.one}`, description: `Cada ${w.one} é ${w.pick('cobrada separada', 'cobrado separado')}.` }]
                   } />
                 
                     {add.pay === 'pacote' && packages.length > 1 &&
@@ -456,6 +563,29 @@ export function TurmaModal({ open, onClose, editing, services, members, onSaved,
           filter((p) => p.service_id === draft.serviceId && p.status === 'active' && p.saldo > 0).
           sort((a, b) => a.created_at < b.created_at ? 1 : -1)[0];
           if (novo) setAdd((a) => ({ ...a, pay: 'pacote', packageId: novo.id }));
+        }} />
+      
+
+      {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): serviço novo (Turma) volta escolhido. */}
+      <NovoServicoHost
+        open={newService.open}
+        onClose={() => setNewService((x) => ({ ...x, open: false }))}
+        initialName={newService.typed}
+        initialKind="turma"
+        onCreated={(s) => {
+          if (isGroupService(s) && s.active) pickService(s.id);
+        }} />
+      
+
+      {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): profissional novo nasce marcado no serviço da turma e volta escolhido. */}
+      <NovoProfissionalHost
+        open={newPro.open}
+        onClose={() => setNewPro((x) => ({ ...x, open: false }))}
+        initialName={newPro.typed}
+        initialServiceIds={draft.serviceId ? [draft.serviceId] : []}
+        onCreated={(m) => {
+          // Só escolhe se ele faz o serviço da turma (a pessoa pode ter desmarcado na etapa Serviços).
+          if (getServices().services.find((s) => s.id === draft.serviceId)?.professionalIds.includes(m.id)) setD('professionalId', m.id);
         }} />
       
 

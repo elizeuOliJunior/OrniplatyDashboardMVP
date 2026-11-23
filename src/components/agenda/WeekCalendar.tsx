@@ -46,6 +46,7 @@ const statusDot: Record<string, string> = { completed: 'var(--success)', pending
  * profissional (cores do filtro). Dia fechado continua visível (com o motivo) e não oferece "Agendar".
  * Folgas e horários especiais de quem está no filtro aparecem no topo do dia.
  * W3 (11/11/2026, combinado 3): o ponto amarelo diz “A confirmar” (antes “Aguardando confirmação”).
+ * G5b: o nome lido em voz alta do cartão de turma usa a palavra do serviço ("treino de …"); lotada fica neutro ("turma lotada").
  */
 export function WeekCalendar({ professionals, toolbar, days, onAppointmentClick, onDayClick, onCreateDay }: WeekCalendarProps) {
   const data = useAgendaData();
@@ -69,7 +70,7 @@ export function WeekCalendar({ professionals, toolbar, days, onAppointmentClick,
           type="button"
           onClick={() => onAppointmentClick(iso, a)}
           title={hasConflict && conflict && !conflict.ok ? conflict.message : exceptional ? 'Encaixe excepcional (registrado)' : undefined}
-          aria-label={`${a.start} a ${a.end}, ${aulaRefOf(a) ? `aula de ${a.clientName}, ${aulaRefOf(a)!.full ? 'lotada' : `${a.service} vagas ocupadas`}` : `${a.clientName}, ${a.service}`}${third ? `. ${thirdPartyLabel(third)}` : ''}${off ? `. ${a.status === 'cancelled' ? 'Cancelado' : 'Faltou'}` : ''}${hasConflict ? '. Conflita com a configuração de horários' : ''}`}
+          aria-label={`${a.start} a ${a.end}, ${aulaRefOf(a) ? `${aulaRefOf(a)!.word} de ${a.clientName}, ${aulaRefOf(a)!.full ? 'turma lotada' : `${a.service} vagas ocupadas`}` : `${a.clientName}, ${a.service}`}${third ? `. ${thirdPartyLabel(third)}` : ''}${off ? `. ${a.status === 'cancelled' ? 'Cancelado' : 'Faltou'}` : ''}${hasConflict ? '. Conflita com a configuração de horários' : ''}`}
           className={`block w-full rounded-lg border-l-4 px-2.5 py-1.5 text-left transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${hasConflict ? 'ring-2 ring-warning-icon' : ''}`}
           style={{ backgroundColor: off ? 'var(--active-surface)' : `${color}14`, borderLeftColor: off ? 'var(--border-strong)' : color }}>
           

@@ -18,11 +18,13 @@ import { blankServicePayment } from './paymentRules';
 import type { ServicePayment } from './paymentRules';
 import { catalogEntryOf, emptyKnowledge, seedCategories, seedServices } from './servicesSeed';
 import { markExamples } from './exampleRecords';
+import { dayWords } from './turmaWords';
+import type { DayWords, TurmaWordId } from './turmaWords';
 
 /* ───────────── tipos ───────────── */
 
 /** CONTRATO NOVO: tipo de atendimento (ajuda a IA a entender "consulta", "avaliação", "sessão"). */
-export type ServiceKind = 'avaliacao' | 'consulta' | 'procedimento' | 'sessao' | 'retorno' | 'aula';
+export type ServiceKind = 'avaliacao' | 'consulta' | 'procedimento' | 'sessao' | 'retorno' | 'turma';
 /** CONTRATO NOVO: modalidade. */
 export type ServiceModality = 'presencial' | 'online';
 /** 'fixo' existe (price_cents). CONTRATO NOVO: 'a-partir' e 'sob-consulta'. */
@@ -32,8 +34,10 @@ export type PriceMode = 'fixo' | 'a-partir' | 'sob-consulta';
  * CONTRATO NOVO (aulas em grupo, 23/11/2026): atendimento em grupo. Mais de um cliente no mesmo horário (aula, turma).
  * `capacity` = vagas por horário (2 a 50). Ausente ou null = atendimento individual (todos os serviços que já existiam).
  * Turmas e inscrições: data/turmas.ts.
+ * G5 (23/11/2026; CONTRATO NOVO): o serviço é em grupo SE E SÓ SE o tipo é "Turma" (`kind: 'turma'`); `group` só existe aí.
+ * `word` = como o serviço chama cada dia da turma (lista fechada em data/turmaWords.ts; padrão Encontro).
  */
-export type ServiceGroup = {capacity: number;};
+export type ServiceGroup = {capacity: number;word: TurmaWordId;};
 
 export type ServiceFaq = {id: string;question: string;answer: string;};
 
@@ -94,16 +98,20 @@ export const KIND_OPTIONS: {value: ServiceKind;label: string;hint: string;}[] = 
 { value: 'procedimento', label: 'Procedimento', hint: 'Execução do serviço em si, numa única vez.' },
 { value: 'sessao', label: 'Sessão', hint: 'Faz parte de uma série (ex.: drenagem, terapia).' },
 { value: 'retorno', label: 'Retorno', hint: 'Acompanhamento depois de um atendimento.' },
-// CONTRATO NOVO (aulas em grupo, 23/11/2026)
-{ value: 'aula', label: 'Aula', hint: 'Encontro com hora marcada para ensinar ou treinar, sozinho ou em grupo.' }];
+// CONTRATO NOVO (aulas em grupo, G5, 23/11/2026): o tipo "Turma" é o único controle que torna o serviço em grupo.
+{ value: 'turma', label: 'Turma', hint: 'Mais de um cliente no mesmo horário: aula, treino, oficina, reunião ou encontro em grupo.' }];
 
 export const kindLabel = (k: ServiceKind) => KIND_OPTIONS.find((o) => o.value === k)?.label ?? '';
 
 /** CONTRATO NOVO (aulas em grupo, 23/11/2026): o serviço é em grupo? */
 export const isGroupService = (s: Pick<ServiceItem, 'group'>) => !!s.group && s.group.capacity > 0;
-/** "Em grupo, 4 vagas" (linha de baixo do nome na lista de serviços). */
-export const groupLabel = (s: Pick<ServiceItem, 'group'>) => isGroupService(s) ? `Em grupo, ${s.group!.capacity} vagas` : '';
-/** Há pelo menos um serviço em grupo ATIVO? (aba Turmas e "Reposição de aula" só existem assim) */
+/** "4 vagas" (linha de baixo do nome na lista de serviços: "Turma · Presencial · 4 vagas"). */
+export const groupLabel = (s: Pick<ServiceItem, 'group'>) => isGroupService(s) ? `${s.group!.capacity} vagas` : '';
+/** G5 (CONTRATO NOVO, aulas em grupo): as formas da palavra de cada dia da turma deste serviço ("esta aula" / "este treino"). */
+export const dayWordsOf = (s?: Pick<ServiceItem, 'group'> | null): DayWords => dayWords(s?.group?.word);
+/** G5: o mesmo, pelo id do serviço. */
+export const dayWordsOfService = (serviceId: string): DayWords => dayWordsOf(getServices().services.find((x) => x.id === serviceId));
+/** Há pelo menos um serviço em grupo ATIVO? (aba Turmas e "Reposição" só existem assim) */
 export const hasActiveGroupService = (list: ServiceItem[]) => list.some((s) => s.active && isGroupService(s));
 
 export const MODALITY_OPTIONS: {value: ServiceModality;label: string;}[] = [
@@ -154,9 +162,9 @@ export const DESCRIPTION_TEMPLATES: Record<ServiceKind, string> = {
   'Sessão de {nome} de cerca de {duracao} min: [o que acontece na sessão]. Costuma ser feita em [número] sessões, com intervalo de [dias] entre elas. [Resultado esperado, sem prometer.]',
   retorno:
   'Retorno de {nome} de cerca de {duracao} min: quem atende confere o resultado do atendimento anterior e ajusta o que for preciso. [Diga se o retorno é cobrado e até quantos dias depois ele vale.]',
-  // CONTRATO NOVO (aulas em grupo, 23/11/2026)
-  aula:
-  'Aula de {nome} de cerca de {duracao} min: [o que acontece na aula]. Indicada para [para quem é]. [Quantas pessoas por turma, o que vestir e o que trazer.]'
+  // CONTRATO NOVO (aulas em grupo, G5, 23/11/2026)
+  turma:
+  '{nome} em turma de cerca de {duracao} min: [o que acontece em cada encontro]. Indicado para [para quem é]. [Quantas pessoas por turma, o que vestir e o que trazer.]'
 };
 
 export function fillTemplate(kind: ServiceKind, name: string, durationMin: number) {

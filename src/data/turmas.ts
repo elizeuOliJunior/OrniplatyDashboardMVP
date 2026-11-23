@@ -40,8 +40,11 @@ export type Turma = {
 
 /** CONTRATO NOVO (aulas em grupo, 23/11/2026) */
 export type EnrollmentKind = 'fixo' | 'avulso';
-/** CONTRATO NOVO (aulas em grupo, 23/11/2026) */
-export type EnrollmentPayment = 'pacote' | 'por-aula';
+/**
+ * CONTRATO NOVO (aulas em grupo, 23/11/2026). G3: `credito` = o avulso paga com um crédito de reposição do mesmo serviço
+ * (data/makeupCredits.ts), usado na chamada.
+ */
+export type EnrollmentPayment = 'pacote' | 'por-aula' | 'credito';
 
 /** CONTRATO NOVO (aulas em grupo, 23/11/2026) */
 export type Enrollment = {
@@ -82,7 +85,8 @@ export const turmaWhen = (t: Pick<Turma, 'weekdays' | 'startTime'>) => `${weekda
  * G2b (23/11/2026): a turma de sexta passou de 09:00 para 08:00. Às 09:00 ela ocupava a vaga das 09:30 de sexta (02/10,
  * cancelamento do Lucas) que mostra a marcação sozinha da Fernanda pela lista de espera. Às 08:00 ela não toca em
  * agendamento, vaga liberada, pedido da lista de espera ou bloqueio da amostra.
- * Só clientes que já existem. Todos pagam por aula: um pacote de amostra novo mudaria Oportunidades e Pacotes.
+ * Só clientes que já existem. G3 (23/11/2026, lote G3 item F): Mariana Teixeira paga pelo pacote de amostra `pk6`
+ * ("Pilates em grupo", 8 sessões, data/api/pacotes.ts); os outros pagam por aula.
  */
 const seedTurmas: Turma[] = [
 // G2: `since` = segunda da semana de amostra (28/09), para a semana de amostra já mostrar as aulas na Agenda.
@@ -90,7 +94,7 @@ const seedTurmas: Turma[] = [
 { id: 'turma-pilates-sex', serviceId: 'pilates-grupo', professionalId: 'juliana', weekdays: [4], startTime: '08:00', active: true, since: '2026-09-28' }];
 
 const seedEnrollments: Enrollment[] = [
-{ id: 'insc-1', turmaId: 'turma-pilates-terqui', clientId: 'mariana-teixeira', kind: 'fixo', payment: 'por-aula' },
+{ id: 'insc-1', turmaId: 'turma-pilates-terqui', clientId: 'mariana-teixeira', kind: 'fixo', payment: 'pacote', packageId: 'pk6' },
 { id: 'insc-2', turmaId: 'turma-pilates-terqui', clientId: 'larissa-campos', kind: 'fixo', payment: 'por-aula' },
 { id: 'insc-3', turmaId: 'turma-pilates-terqui', clientId: 'helena-duarte', kind: 'fixo', payment: 'por-aula' },
 { id: 'insc-4', turmaId: 'turma-pilates-sex', clientId: 'carla-mendes', kind: 'fixo', payment: 'por-aula' },
@@ -130,10 +134,11 @@ export function setTurmaActive(id: string, active: boolean) {
 
 /**
  * G2 (aulas em grupo, 23/11/2026; CONTRATO NOVO): avulso de UMA aula, adicionado pela janela da aula ou pelo Novo
- * agendamento. Paga por aula (o avulso não pergunta a forma de pagar, decisão do G1).
+ * agendamento. G3: a janela da aula pergunta como paga (reposição, pacote ou por aula); sem escolha, por aula (Novo
+ * agendamento).
  */
-export function addAvulso(turmaId: string, clientId: string, date: string): Enrollment {
-  const e: Enrollment = { id: newEnrollmentId(), turmaId, clientId, kind: 'avulso', date, payment: 'por-aula', packageId: null };
+export function addAvulso(turmaId: string, clientId: string, date: string, payment: EnrollmentPayment = 'por-aula', packageId: string | null = null): Enrollment {
+  const e: Enrollment = { id: newEnrollmentId(), turmaId, clientId, kind: 'avulso', date, payment, packageId: payment === 'pacote' ? packageId : null };
   emit({ ...state, enrollments: [...state.enrollments, e] });
   return e;
 }
@@ -157,8 +162,24 @@ export const enrollmentsOf = (turmaId: string, s: State = state) => s.enrollment
 
 /** Inscrições que ocupam vaga hoje: todo fixo + avulso de hoje em diante. */
 export const occupyingOf = (list: Enrollment[]) => list.filter((e) => e.kind === 'fixo' || (e.date ?? '') >= TODAY_ISO);
-/** Ocupação da turma (quantas vagas estão tomadas). */
-export const occupancyOf = (turmaId: string, s: State = state) => occupyingOf(enrollmentsOf(turmaId, s)).length;
+/**
+ * Ocupação da turma (quantas vagas estão tomadas). G5 (D; CONTRATO NOVO, aulas em grupo, 23/11/2026): no nível da TURMA
+ * contam só os fixos ("3 de 4"); "Lotada" na turma = fixos = vagas. O avulso conta só na data dele (cartão da Agenda e
+ * janela daquele dia, data/aulas.ts). Antes somava avulsos de outras datas ("4 de 4 · Lotada" com 3 fixos).
+ */
+export const occupancyOf = (turmaId: string, s: State = state) => enrollmentsOf(turmaId, s).filter((e) => e.kind === 'fixo').length;
+/**
+ * G5 (D; CONTRATO NOVO): primeira data futura em que a turma já está cheia por causa de avulsos (fixos + avulsos daquela
+ * data = vagas). Um fixo novo viria também nessa data, então não pode entrar. `list` = inscrições (salvas ou do rascunho).
+ */
+export function dateFullByAvulso(list: Enrollment[], capacity: number): string | null {
+  if (capacity <= 0) return null;
+  const fixos = list.filter((e) => e.kind === 'fixo').length;
+  const dates = [...new Set(list.filter((e) => e.kind === 'avulso' && (e.date ?? '') >= TODAY_ISO).map((e) => e.date!))].sort();
+  return dates.find((d) => fixos + list.filter((e) => e.kind === 'avulso' && e.date === d).length >= capacity) ?? null;
+}
+/** G5 (D): quantos clientes vêm numa data da turma (todos os fixos + os avulsos dela). */
+export const seatsOnDate = (list: Enrollment[], date: string) => list.filter((e) => e.kind === 'fixo' || e.kind === 'avulso' && e.date === date).length;
 /** Vagas do serviço da turma (0 = o serviço não é mais em grupo). */
 export const capacityOfService = (serviceId: string) => getServices().services.find((x) => x.id === serviceId)?.group?.capacity ?? 0;
 /** A turma está lotada? */

@@ -7,7 +7,7 @@ import { Card } from '../components/Card';
 import { ActionMenu } from '../components/ui/ActionMenu';
 import type { ActionMenuItem } from '../components/ui/ActionMenu';
 import { ClientCard, ClientNumbers, NextAppointmentCard } from '../components/client/ClientProfile';
-import { HistoricoCard, PacotesCard } from '../components/client/ClientHistory';
+import { HistoricoCard, PacotesCard, ReposicoesCard, TurmasCard } from '../components/client/ClientHistory';
 import { ClientRegistrationForm } from '../components/client/ClientRegistrationForm';
 import { ExportarDadosModal } from '../components/client/PrivacidadeCards';
 import { OPT_OUT_ACTION_LABEL, useStoppableKinds } from '../components/client/ContatoCard';
@@ -188,6 +188,9 @@ export function FichaCliente() {
             <NextAppointmentCard ficha={ficha} onAbrir={abrirAtendimento} onAgendar={agendar} />
             <HistoricoCard ficha={ficha} onAbrirAtendimento={abrirAtendimento} onAbrirPacote={setPacoteAberto} />
             <PacotesCard ficha={ficha} pacotes={pacotes} onAbrirPacote={setPacoteAberto} onVenderPacote={archived ? undefined : () => setVendendo(true)} />
+            {/* G3 (E, CONTRATO NOVO, aulas em grupo): no padrão do cartão Pacotes. */}
+            <TurmasCard ficha={ficha} />
+            <ReposicoesCard ficha={ficha} />
             <AcompanhamentoCard clientId={client.id} cases={cases} mode={mode} />
           </div>
         </div>

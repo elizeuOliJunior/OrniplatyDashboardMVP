@@ -33,6 +33,7 @@ import { setAppointmentStatus } from '../../data/agendaLive';
 import { markConfirmedByTeam, reminderOf, reminderRow, useRemindersVersion } from '../../data/reminders';
 import { conversationLink } from '../../data/deepLinks';
 import { ARCHIVED_NO_BOOKING } from '../../data/archivedClients';
+import { rollCallsOfClient, useAulasVersion } from '../../data/aulas';
 import { remindersBlockedOf, useContactBlocks } from '../../data/contactPreferences';
 
 /*
@@ -110,18 +111,33 @@ function useOpenAmount(ficha: ClientProfileResponse) {
 export function ClientNumbers({ ficha }: {ficha: ClientProfileResponse;}) {
   const { client } = ficha;
   const { cents, semValor } = useOpenAmount(ficha);
+  // G4 (CONTRATO NOVO, aulas em grupo, 23/11/2026): cada Presente numa chamada é um atendimento e cada Faltou é uma falta
+  // (mesma regra de Resultados, data/aulas.ts `rollCallAttendances`).
+  useAulasVersion();
+  const aulas = rollCallsOfClient(client.id);
+  const aulasPresente = aulas.filter((x) => x.mark === 'presente');
   const fromIso = addDays(TODAY_ISO, -365);
-  const faltasLista = ficha.atendimentos.filter((a) => a.status === 'no_show' && a.date >= fromIso && a.date <= TODAY_ISO);
+  const faltasLista = [
+  ...ficha.atendimentos.filter((a) => a.status === 'no_show').map((a) => a.date),
+  ...aulas.filter((x) => x.mark === 'faltou').map((x) => x.aula.iso)].
+  filter((d) => d >= fromIso && d <= TODAY_ISO);
   const faltas = faltasLista.length;
-  const ultimaFalta = faltasLista.map((a) => a.date).sort().pop();
-  const ultimo = ficha.ultimo_atendimento;
+  const ultimaFalta = faltasLista.sort().pop();
+  const ultimoAgenda = ficha.ultimo_atendimento;
+  const ultimaAula = aulasPresente[0]?.aula;
+  const ultimo =
+  ultimaAula && (!ultimoAgenda || ultimaAula.iso + ultimaAula.start > ultimoAgenda.date + ultimoAgenda.start_time) ?
+  { date: ultimaAula.iso, service: { name: ultimaAula.serviceName } } :
+  ultimoAgenda;
+  const atendimentos = client.completed_appointments + aulasPresente.length;
+  const primeiroContato = client.first_contact_at;
   const pendente = cents > 0 || semValor > 0;
   const abertoDetalhe = cents > 0 ? 'Detalhe no Financeiro' : semValor > 0 ? semValor === 1 ? '1 pendência sem valor' : `${semValor} pendências sem valor` : 'Nada pendente';
-  const atendDetalhe = client.completed_appointments === 0 ? 'Nenhum realizado' : client.first_contact_at ? `Desde ${dataBR(client.first_contact_at)}` : 'Realizados';
+  const atendDetalhe = atendimentos === 0 ? 'Nenhum realizado' : primeiroContato ? `Desde ${dataBR(primeiroContato)}` : 'Realizados';
 
   return (
     <StatStrip label={`Resumo de ${client.name}`}>
-      <StatStripItem label="Atendimentos" value={client.completed_appointments} detail={atendDetalhe} />
+      <StatStripItem label="Atendimentos" value={atendimentos} detail={atendDetalhe} />
       <StatStripItem label="Faltas · 12 meses" value={faltas} detail={ultimaFalta ? `Última em ${dataBR(ultimaFalta)}` : 'Nenhuma falta'} />
       <StatStripItem
         label="Último atendimento"

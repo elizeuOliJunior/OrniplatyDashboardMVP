@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useScreenInit } from '../useScreenInit.js';
 import { markConfigured } from '../data/exampleRecords';
-import { tabListNoScroll } from '../components/ui/styles';
+import { tabListNoScroll, toolbarClass } from '../components/ui/styles';
 import { PlusIcon } from 'lucide-react';
 import { DashboardLayout } from '../components/dashboard/DashboardLayout';
 import { Button } from '../components/Button';
@@ -63,6 +63,8 @@ export function ServicosEquipe() {
   const [serviceTab, setServiceTab] = useState<string | undefined>();
   const [editingService, setEditingService] = useState<ServiceItem | null>(null);
   const [categoriesModal, setCategoriesModal] = useState(false);
+  /** G5: aberta pelo "+ Nova categoria" (pronta para digitar a nova). */
+  const [categoriesFocusNew, setCategoriesFocusNew] = useState(false);
   const [proModal, setProModal] = useState(false);
   const [proTab, setProTab] = useState<string | undefined>();
   const [editingPro, setEditingPro] = useState<TeamMember | null>(null);
@@ -159,9 +161,22 @@ export function ServicosEquipe() {
             members={team}
             onOpen={(s, t) => openService(s, t)}
             action={
-            <Button leftIcon={<PlusIcon className="h-4 w-4" />} onClick={() => openService(null)}>
-                Novo serviço
-              </Button>
+            // G5 (23/11/2026, decisão do Christian): "+ Nova categoria" (secundário) logo à esquerda de "+ Novo serviço".
+            <div className={toolbarClass}>
+                <Button
+                variant="secondary"
+                leftIcon={<PlusIcon className="h-4 w-4" />}
+                onClick={() => {
+                  setCategoriesFocusNew(true);
+                  setCategoriesModal(true);
+                }}>
+                
+                  Nova categoria
+                </Button>
+                <Button leftIcon={<PlusIcon className="h-4 w-4" />} onClick={() => openService(null)}>
+                  Novo serviço
+                </Button>
+              </div>
             } />
           
         </TabsContent>
@@ -213,7 +228,10 @@ export function ServicosEquipe() {
         members={team}
         hasHistory={(id) => serviceHasHistory(services.find((s) => s.id === id)?.name ?? '')}
         initialKind={newKind}
-        onManageCategories={() => setCategoriesModal(true)}
+        onManageCategories={() => {
+          setCategoriesFocusNew(false);
+          setCategoriesModal(true);
+        }}
         onNewEvaluation={() => window.setTimeout(() => openService(null, 'basico', 'avaliacao'), 50)}
         onSave={(s, conflicts) => {
           const prosChanged = professionalLinkChanges(s);
@@ -264,6 +282,7 @@ export function ServicosEquipe() {
       <CategoriasModal
         open={categoriesModal}
         onClose={() => setCategoriesModal(false)}
+        focusNew={categoriesFocusNew}
         categories={categories}
         services={services}
         onSave={(list) => {

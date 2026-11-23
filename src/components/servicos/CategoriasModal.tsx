@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { AppModal } from '../ui/AppModal';
 import { ModalActions } from '../ui/ModalActions';
@@ -22,7 +22,9 @@ replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`;
  * Categorias da clínica: criar, renomear, reordenar e excluir (só vazias).
  * Backend: `category` é texto livre (100) no serviço. A ORDEM e a lista própria de categorias são CONTRATO NOVO.
  */
-export function CategoriasModal({ open, onClose, categories, services, onSave }: {open: boolean;onClose: () => void;categories: Category[];services: ServiceItem[];onSave: (list: Category[]) => void;}) {
+/** G5 (23/11/2026): `focusNew` = aberta pelo "+ Nova categoria" da aba Serviços, já pronta para digitar a nova categoria. */
+export function CategoriasModal({ open, onClose, categories, services, onSave, focusNew = false }: {open: boolean;onClose: () => void;categories: Category[];services: ServiceItem[];onSave: (list: Category[]) => void;focusNew?: boolean;}) {
+  const newRef = useRef<HTMLDivElement>(null);
   const [list, setList] = useState<Category[]>(categories);
   const [draft, setDraft] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -32,6 +34,12 @@ export function CategoriasModal({ open, onClose, categories, services, onSave }:
       setList(categories.map((c) => ({ ...c })));
       setDraft('');
       setSubmitted(false);
+      if (focusNew)
+      window.setTimeout(() => {
+        const input = newRef.current?.querySelector('input');
+        input?.scrollIntoView({ block: 'nearest' });
+        input?.focus();
+      }, 60);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -112,7 +120,7 @@ export function CategoriasModal({ open, onClose, categories, services, onSave }:
 
         <div>
           <p className="text-sm font-semibold text-text-primary">Nova categoria</p>
-          <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div ref={newRef} className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-start">
             <Input
               aria-label="Nome da nova categoria"
               placeholder="Ex.: Capilar"

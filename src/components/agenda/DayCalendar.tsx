@@ -393,7 +393,7 @@ export function DayCalendar({ professionals, iso, toolbar, appointments, blocks,
                         id={`agenda-appt-${appt.id}`}
                         type="button"
                         onClick={() => onAppointmentClick(appt)}
-                        aria-label={`${appt.start}, ${aulaRefOf(appt) ? `aula de ${appt.clientName}, ${aulaRefOf(appt)!.full ? 'lotada' : `${appt.service} vagas ocupadas`}` : `${appt.clientName}, ${appt.service}`}${third ? `. ${thirdPartyLabel(third)}` : ''}${off ? `. ${appt.status === 'cancelled' ? 'Cancelado' : 'Faltou'}` : ''}${exceptional ? '. Encaixe excepcional' : ''}${scheduleConflict ? '. Conflita com a configuração de horários' : svc ? '. Fora da regra do serviço' : ''}`}
+                        aria-label={`${appt.start}, ${aulaRefOf(appt) ? `${aulaRefOf(appt)!.word} de ${appt.clientName}, ${aulaRefOf(appt)!.full ? 'turma lotada' : `${appt.service} vagas ocupadas`}` : `${appt.clientName}, ${appt.service}`}${third ? `. ${thirdPartyLabel(third)}` : ''}${off ? `. ${appt.status === 'cancelled' ? 'Cancelado' : 'Faltou'}` : ''}${exceptional ? '. Encaixe excepcional' : ''}${scheduleConflict ? '. Conflita com a configuração de horários' : svc ? '. Fora da regra do serviço' : ''}`}
                         className={`absolute inset-x-1.5 z-10 overflow-hidden rounded-lg border-l-4 px-2.5 py-1.5 text-left transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${hasConflict ? 'ring-2 ring-warning-icon' : ''}`}
                         style={{
                           top: topFor(appt.start) + 2,

@@ -20,7 +20,7 @@ import { agendaWaitlist } from '../../data/agenda';
 import { activeAgendaProfessionals, agendaProfessionalByName, agendaProfessionalOf, getTeam } from '../../data/availability';
 import { allClientsForSelect, clientById, clientIdOfRecordedName } from '../../data/api/clientes';
 import { activeServiceOf, catalogServices, resolveService, serviceUseIssue } from '../../data/catalogo';
-import { getServices, isGroupService } from '../../data/servicesStore';
+import { dayWordsOf, getServices, isGroupService } from '../../data/servicesStore';
 import { wordsNow } from '../../data/segment';
 import { TODAY_ISO, mediumDayLabel, NOW } from '../../data/agendaStore';
 import type { CalAppointment, CalBlock } from '../../data/agendaStore';
@@ -403,7 +403,7 @@ export function answer(raw: string, ctx: AssistantContext): AssistantReply {
   // individual nem oferece vaga de aula (isso seria um fluxo novo); aponta o caminho certo e não agenda nada.
   const groupSvc = service ? getServices().services.find((s) => s.active && s.name === service && isGroupService(s)) : undefined;
   if (groupSvc) {
-    return { text: `${groupSvc.name} acontece em turmas, não em horário individual. Para pôr alguém numa aula, use “Novo agendamento” e escolha a turma e o dia. Nada foi agendado.` };
+    return { text: `${groupSvc.name} acontece em turmas, não em horário individual. Para pôr alguém ${dayWordsOf(groupSvc).pick('numa', 'num')} ${dayWordsOf(groupSvc).one}, use “Novo agendamento” e escolha a turma e o dia. Nada foi agendado.` };
   }
 
   // Cancelar

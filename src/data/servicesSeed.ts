@@ -28,8 +28,8 @@ export const seedCategories: Category[] = [
 { id: 'facial', name: 'Facial' },
 { id: 'corporal', name: 'Corporal' },
 { id: 'injetaveis', name: 'Injetáveis' },
-// CONTRATO NOVO (aulas em grupo, 23/11/2026): categoria da amostra do G1.
-{ id: 'aulas', name: 'Aulas' }];
+// CONTRATO NOVO (aulas em grupo, 23/11/2026): categoria da amostra do G1 (G5: nome "Bem-estar"; o id não muda).
+{ id: 'aulas', name: 'Bem-estar' }];
 
 
 export const seedServices: ServiceItem[] = [
@@ -122,7 +122,7 @@ export const seedServices: ServiceItem[] = [
   id: 'pilates-grupo',
   name: 'Pilates em grupo',
   categoryId: 'aulas',
-  kind: 'aula',
+  kind: 'turma',
   modality: 'presencial',
   durationMin: 60,
   priceMode: 'fixo',
@@ -132,7 +132,7 @@ export const seedServices: ServiceItem[] = [
   professionalIds: ['juliana', 'rafael'],
   active: true,
   payment: blankServicePayment(),
-  group: { capacity: 4 },
+  group: { capacity: 4, word: 'aula' },
   knowledge: {
     ...emptyKnowledge(
       'Aula de pilates em grupo de cerca de 60 min, com até 4 pessoas e a mesma profissional toda semana: exercícios de alongamento, força e postura no aparelho e no solo. Indicada para quem quer melhorar a postura e o condicionamento. Venha com roupa confortável e meia antiderrapante.'

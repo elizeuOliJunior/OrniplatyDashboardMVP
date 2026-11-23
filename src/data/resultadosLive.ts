@@ -12,10 +12,27 @@ import { closurePayment } from './financeReaders';
 import { serviceByName, useServices } from './servicesStore';
 import { CONVERSATION_RECORDS_FROM, conversationThreads, useConversations } from './conversasThreads';
 import type { LiveSources } from './resultadosDemo';
+import { rollCallAttendances, useAulasVersion } from './aulas';
 
 /** Motivo do caso pelo id estável (prefixo dos geradores de data/followUp.ts). */
 const motiveOfCase = (caseId: string) =>
 caseId.startsWith('fu-sumiu-') ? 'sumiu' : caseId.startsWith('fu-falta-') ? 'faltou' : caseId.startsWith('fu-preco-') ? 'pediu-preco' : caseId.startsWith('fu-pacote-') ? 'pacote' : 'retorno';
+
+/**
+ * G4 (CONTRATO NOVO, aulas em grupo, 23/11/2026): regra dos números. Cada cliente marcado na chamada de uma aula entra
+ * aqui como UM registro do dia, do serviço e do profissional da aula: Presente = atendimento realizado, Faltou = falta.
+ * O id é o mesmo do fechamento do dinheiro de quem paga por aula (`aula:<turma@data>:<cliente>`), então o recebimento
+ * fica ligado ao atendimento (linhas de serviço e de profissional). Só para Resultados: a Agenda não muda.
+ */
+function withClassAttendances(appointments: LiveSources['appointments']): LiveSources['appointments'] {
+  const list = rollCallAttendances();
+  if (!list.length) return appointments;
+  const out: LiveSources['appointments'] = { ...appointments };
+  list.forEach((r) => {
+    out[r.iso] = [...(out[r.iso] ?? []), { id: r.id, professionalId: r.professionalId, start: r.time, clientName: r.client, service: r.service, status: r.mark === 'presente' ? 'completed' : 'no_show', source: 'painel', createdActorType: 'user' }];
+  });
+  return out;
+}
 
 /** Registros vivos AGORA (leitura pura dos stores; também usada pelos testes de função). */
 export function liveSourcesNow(): LiveSources {
@@ -43,7 +60,7 @@ export function liveSourcesNow(): LiveSources {
   ...getDeposits().filter((d) => !applied.has(d.id)).map((d) => ({ id: `sinal:${d.id}`, iso: d.iso, cents: d.cents, method: d.method, service: d.service, kind: 'sinal' as const }))];
 
   return {
-    appointments,
+    appointments: withClassAttendances(appointments),
     history: historyVisits(),
     closures: entries.map((e) => closurePayment(e)),
     packageReceipts,
@@ -67,7 +84,8 @@ export function useResultsSources(): LiveSources {
   const cv = useClientsVersion();
   const { services } = useServices();
   useConversations();
+  const av = useAulasVersion();
   const conversationsKey = Object.values(conversationThreads).reduce((n, t) => n + t.length, 0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => liveSourcesNow(), [appointments, entries, deposits, lv, pv, cv, services, conversationsKey]);
+  return useMemo(() => liveSourcesNow(), [appointments, entries, deposits, lv, pv, cv, services, conversationsKey, av]);
 }

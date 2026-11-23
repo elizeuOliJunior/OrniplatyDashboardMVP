@@ -19,6 +19,15 @@ import { awaitingFromInsurers, brl, copayOpen, particularOpenCents, receivedPart
 import type { FinanceEntry } from '../../data/convenios';
 import { useGuardedNavigate } from '../ui/UnsavedChanges';
 import { isPendingClosure, refundedCents, thirdPartyLabel, thirdPartyOf, useLegado } from '../../data/legado';
+import { aulaClientApptId, aulaDayText, creditsWithReservations, enrollmentPayText, nextAulaOf, rollCallsOfClient, useAulasVersion } from '../../data/aulas';
+import { turmaWhen, useTurmas } from '../../data/turmas';
+import { dayWordsOf, dayWordsOfService, hasActiveGroupService, useServices } from '../../data/servicesStore';
+import { getTeam } from '../../data/availability';
+import { TODAY_ISO } from '../../data/agendaStore';
+import { CREDIT_REASON_LABEL, CREDIT_STATE_LABEL, useMakeupCreditsVersion } from '../../data/makeupCredits';
+import type { CreditState } from '../../data/makeupCredits';
+import { makeupOn, useMakeupRules } from '../../data/makeupRules';
+import type { PillTone } from '../ui/StatusPill';
 
 /*
  * Rodada 5 (11/11/2026, Christian, DS v4.5):
@@ -136,6 +145,36 @@ export function PacotesCard({
 type Aba = 'atendimentos' | 'procedimentos' | 'financeiro';
 
 /**
+ * G3 (E, CONTRATO NOVO, aulas em grupo, 23/11/2026): aulas com chamada salva entram no Histórico COMO atendimentos, com o
+ * nome do serviço: Presente = concluído (também em Procedimentos), Faltou = falta. Ficam só na tela da ficha (o cadastro
+ * não muda; G4: os números do topo contam as aulas em `ClientNumbers`). Abrir uma delas mostra o mesmo detalhe de atendimento, só leitura.
+ */
+function withAulas(ficha: ClientProfileResponse): ClientProfileResponse {
+  const rolls = rollCallsOfClient(ficha.client.id);
+  if (!rolls.length) return ficha;
+  const team = getTeam().members;
+  const rows: AppointmentResponse[] = rolls.map(({ aula, mark }) => {
+    const pro = team.find((m) => m.id === aula.professionalId);
+    return {
+      id: aulaClientApptId(aula.key, ficha.client.id),
+      date: aula.iso,
+      start_time: aula.start,
+      status: mark === 'presente' ? 'completed' : 'no_show',
+      service: { name: aula.serviceName },
+      professional: pro ? { name: pro.name, color: pro.color } : null
+    };
+  });
+  const key = (a: AppointmentResponse) => `${a.date} ${a.start_time}`;
+  const atendimentos = [...ficha.atendimentos, ...rows].sort((x, y) => key(y).localeCompare(key(x)));
+  const feitas = rows.filter((r) => r.status === 'completed');
+  const procedimentos = [
+  ...ficha.procedimentos,
+  ...feitas.map((r) => ({ id: `p-${r.id}`, service_name: r.service?.name ?? '—', appointment_id: r.id, date: r.date, professional_name: r.professional?.name ?? null }))].
+  sort((x, y) => y.date.localeCompare(x.date));
+  return { ...ficha, atendimentos, atendimentos_total: ficha.atendimentos_total + rows.length, procedimentos, procedimentos_total: ficha.procedimentos_total + feitas.length };
+}
+
+/**
  * DIVERGÊNCIA DA AMOSTRA (11/11/2026): o mesmo atendimento pode aparecer duas vezes, como lançamento avulso (amostra de
  * `data/api/pacotes.ts`, ex.: Carla 01/10) e como atendimento fechado (fixture de `data/convenios.ts`). Para o TOTAL não
  * somar o mesmo dinheiro duas vezes, o lançamento avulso com a mesma data e o mesmo serviço de um fechamento fica fora da
@@ -151,7 +190,7 @@ const mesmoAtendimento = (r: FinancialRecord, fechamentos: FinanceEntry[]) =>
  * Rodada 7: pagamento avulso e atendimento fechado abrem o detalhe do atendimento.
  */
 export function HistoricoCard({
-  ficha,
+  ficha: fichaBase,
   onAbrirAtendimento,
   onAbrirPacote
 
@@ -160,7 +199,9 @@ export function HistoricoCard({
 
 }: {ficha: ClientProfileResponse;onAbrirAtendimento: (a: AppointmentResponse) => void;onAbrirPacote: (id: string) => void;}) {
   useLegado();
+  useAulasVersion();
   const [aba, setAba] = useState<Aba>('atendimentos');
+  const ficha = withAulas(fichaBase);
   const nome = ficha.client.name;
 
   /**
@@ -353,5 +394,125 @@ export function ClientHistory({
       <PacotesCard ficha={ficha} pacotes={pacotes} onAbrirPacote={onAbrirPacote} onVenderPacote={onVenderPacote} />
       <HistoricoCard ficha={ficha} onAbrirAtendimento={onAbrirAtendimento} onAbrirPacote={onAbrirPacote} />
     </div>);
+
+}
+
+/* ───────────── G3 (E, CONTRATO NOVO, aulas em grupo, 23/11/2026) ───────────── */
+
+/** Cabeçalho igual ao do cartão Pacotes: título, número e o botão de ver tudo. */
+function CardHead({ id, title, count, action }: {id: string;title: string;count: number;action?: React.ReactNode;}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 id={id} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className="text-base font-bold text-text-primary">{title}</span>
+        <span className="rounded-full bg-surface-muted px-2 py-0.5 text-xs font-semibold tabular-nums text-text-secondary">{count}</span>
+      </h2>
+      {action && <span className="flex flex-wrap justify-end gap-2">{action}</span>}
+    </div>);
+
+}
+
+/**
+ * Turmas do cliente (mesmo padrão do cartão Pacotes). Cada turma: Fixo ou Avulso, como paga e a próxima aula. Avulso de
+ * data que já passou sai daqui (fica no Histórico). Aparece com um serviço em grupo ativo ou com alguma turma do cliente.
+ */
+export function TurmasCard({ ficha }: {ficha: ClientProfileResponse;}) {
+  const go = useGuardedNavigate();
+  useAulasVersion();
+  useBackendVersion();
+  const { turmas, enrollments } = useTurmas();
+  const { services } = useServices();
+  const mine = enrollments.filter((e) => e.clientId === ficha.client.id && (e.kind === 'fixo' || (e.date ?? '') >= TODAY_ISO) && turmas.some((t) => t.id === e.turmaId && t.active));
+  if (!mine.length && !hasActiveGroupService(services)) return null;
+  const team = getTeam().members;
+  const rows = mine.
+  map((e) => {
+    const t = turmas.find((x) => x.id === e.turmaId)!;
+    const svc = services.find((x) => x.id === t.serviceId);
+    const next = nextAulaOf(e);
+    return { e, t, svc, next, pro: team.find((m) => m.id === t.professionalId) };
+  }).
+  sort((x, y) => (x.next ? x.next.iso + x.next.start : '9').localeCompare(y.next ? y.next.iso + y.next.start : '9'));
+  return (
+    <Card as="section" padding="lg" id="bloco-turmas" aria-labelledby="turmas-titulo" className="scroll-mt-6">
+      <CardHead
+        id="turmas-titulo"
+        title="Turmas"
+        count={rows.length}
+        action={
+        hasActiveGroupService(services) ?
+        <button type="button" onClick={() => go('/servicos-equipe?aba=turmas')} className={cardButton}>
+              Ver na aba Turmas
+            </button> :
+        undefined
+        } />
+      
+      <div className="mt-4">
+        {rows.length === 0 ?
+        <Vazio texto="Este cliente não está em nenhuma turma." /> :
+
+        <ScrollList ariaLabel={`Turmas de ${ficha.client.name}`} visible={3} className="flex flex-col gap-2">
+            {rows.map(({ e, t, svc, next, pro }) =>
+          <li key={e.id}>
+                <RecordRow
+              date={next ? dataBR(next.iso) : '—'}
+              dateDetail={next ? next.start : `Sem ${dayWordsOf(svc).one}`}
+              title={svc?.name ?? 'Serviço'}
+              subtitle={`${e.kind === 'fixo' ? `Fixo · ${turmaWhen(t)}` : `Avulso · ${dataBR(e.date ?? '')}`}${pro ? ` · ${pro.name}` : ''} · ${enrollmentPayText(e)}`}
+              aside={<StatusPill tone="neutral" label={e.kind === 'fixo' ? 'Fixo' : 'Avulso'} />}
+              ariaLabel={`${svc?.name ?? 'Turma'}, ${e.kind === 'fixo' ? 'fixo' : 'avulso'}${next ? `, ${dayWordsOf(svc).pick('próxima', 'próximo')} ${dayWordsOf(svc).one} em ${dataBR(next.iso)} às ${next.start}` : ''}`} />
+            
+              </li>
+          )}
+          </ScrollList>
+        }
+      </div>
+    </Card>);
+
+}
+
+const CREDIT_TONE: Record<CreditState, PillTone> = { disponivel: 'success', reservado: 'info', usado: 'neutral', vencido: 'muted' };
+
+/**
+ * Reposições do cliente (créditos de data/makeupCredits.ts): disponíveis com a validade, usadas e vencidas. Some quando a
+ * empresa tem as duas regras de reposição desligadas e o cliente não tem crédito nenhum.
+ */
+export function ReposicoesCard({ ficha }: {ficha: ClientProfileResponse;}) {
+  useMakeupCreditsVersion();
+  useAulasVersion();
+  const rules = useMakeupRules();
+  // G4 (CONTRATO NOVO, aulas em grupo): crédito prometido a um avulso aparece "Reservado para a aula de ‹dia›".
+  const list = creditsWithReservations(ficha.client.id);
+  if (!makeupOn(rules) && list.length === 0) return null;
+  const order: CreditState[] = ['disponivel', 'reservado', 'usado', 'vencido'];
+  const sorted = [...list].sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || a.expiresIso.localeCompare(b.expiresIso));
+  return (
+    <Card as="section" padding="lg" id="bloco-reposicoes" aria-labelledby="reposicoes-titulo" className="scroll-mt-6">
+      <CardHead id="reposicoes-titulo" title="Reposições" count={list.filter((c) => c.state === 'disponivel').length} />
+      <div className="mt-4">
+        {sorted.length === 0 ?
+        <Vazio texto="Este cliente ainda não tem nenhuma reposição." /> :
+
+        <ScrollList ariaLabel={`Reposições de ${ficha.client.name}`} visible={3} className="flex flex-col gap-2">
+            {sorted.map((c) => {
+            // G5 (CONTRATO NOVO, aulas em grupo): a palavra do serviço do crédito ("Aula cancelada" / "Treino cancelado").
+            const w = dayWordsOfService(c.serviceId);
+            const reason = c.reason === 'cancelada' ? `${w.One} ${w.pick('cancelada', 'cancelado')}` : CREDIT_REASON_LABEL[c.reason];
+            return (
+              <li key={c.id}>
+                  <RecordRow
+                  date={dataBR(c.aulaIso)}
+                  dateDetail={w.One}
+                  title={c.serviceName}
+                  subtitle={`${reason} · ${c.state === 'reservado' && c.reservedFor ? `Reservado para ${w.the} de ${aulaDayText(c.reservedFor.iso)}` : c.state === 'usado' && c.use ? `usada ${w.inThe} de ${dataBR(c.use.aulaIso)}` : `${c.state === 'vencido' ? 'venceu em' : 'vence em'} ${dataBR(c.expiresIso)}`}`}
+                  aside={<StatusPill tone={CREDIT_TONE[c.state]} label={CREDIT_STATE_LABEL[c.state]} minWidth="md" />} />
+                
+                </li>);
+
+          })}
+          </ScrollList>
+        }
+      </div>
+    </Card>);
 
 }

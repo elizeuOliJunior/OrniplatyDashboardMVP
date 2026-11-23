@@ -21,6 +21,8 @@ import { clientIdOfRecordedName } from '../../data/api/clientes';
 import { absorbAppointmentRecords, consumeSession, packageBlockReason, reverseConsumption, usablePackagesFor, useBackendVersion } from '../../data/api/pacotes';
 import { clinicDay, freeStartTimes, nextOpenIso, scheduleConflicts } from '../../data/availability';
 import { serviceByName } from '../../data/servicesStore';
+import { aulaByKey } from '../../data/aulas';
+import { dayWords } from '../../data/turmaWords';
 import { durationText, serviceReturnSentence } from '../../data/followUpModels';
 import { automacoesStore } from '../../data/automacoes';
 import { empresaStore } from '../../data/empresa';
@@ -62,6 +64,13 @@ type FecharAtendimentoModalProps = {
   onClose: () => void;
   appointment: ClosableAppointment | null;
   onClosed?: (attended: boolean) => void;
+  /**
+   * CONTRATO NOVO (aulas em grupo, G3, 23/11/2026): pagamento de UM cliente de uma aula em grupo, aberto pela chamada.
+   * É esta mesma janela e o mesmo passo de pagamento (valor, particular/convênio, forma, "Recebido agora / Ainda não
+   * pagou", `closeFinance`). A presença já veio da chamada, então somem "O cliente compareceu?", o procedimento, o pacote
+   * (o pacote da aula é usado pela própria chamada) e o Retorno. O `appointment.id` é `aula:<turma>@<data>:<cliente>`.
+   */
+  aula?: boolean;
 };
 
 const PAYERS = [
@@ -116,8 +125,10 @@ const priceInput = (value: string) => {
  * atendimento vira o fechamento), A4-14 ("Não marcado" segue a regra do serviço), A3-01 (frase do "Já marcado") e
  * A3-21 (horário já marcado em conflito).
  */
-export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }: FecharAtendimentoModalProps) {
+export function FecharAtendimentoModal({ open, onClose, appointment, onClosed, aula = false }: FecharAtendimentoModalProps) {
   const toast = useToast();
+  /** G5b: pagamento de um dia de turma usa a palavra do serviço ("Pagamento do treino"). id = `aula:<turma>@<data>:<cliente>`. */
+  const aulaWords = aula && appointment?.id ? aulaByKey(appointment.id.slice(5, appointment.id.lastIndexOf(':')))?.words ?? dayWords() : dayWords();
   const mode = useSavedAutomationMode();
   const empresa = useSavedStore(empresaStore);
   useBackendVersion();
@@ -243,9 +254,11 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
       const key = appt?.id ?? appointment.id ?? `${appointment.iso ?? TODAY_ISO}|${appointment.time ?? ''}|${appointment.clientName}`;
       const onlyOne = usablePackagesFor(cid, s?.label ?? appointment.service, appointment.iso ?? TODAY_ISO, key);
       setPkg(
-        linked && !packageBlockReason(linked, cid, s?.label ?? appointment.service, appointment.iso ?? TODAY_ISO) ? linked : !linked && onlyOne.length === 1 ? onlyOne[0].id : ''
+        aula ? '' : linked && !packageBlockReason(linked, cid, s?.label ?? appointment.service, appointment.iso ?? TODAY_ISO) ? linked : !linked && onlyOne.length === 1 ? onlyOne[0].id : ''
       );
       fillReturn(s?.value ?? '', s?.label ?? appointment.service);
+      // CONTRATO NOVO (aulas em grupo, G3): pagamento de aula não tem Retorno.
+      if (aula) setRet('nao-precisa');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -253,7 +266,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
   // ── pacote (F-052) ──
   const prelinkId = sourceAppt?.packageSaleId ?? null;
   const prelinkBlock = open && prelinkId ? packageBlockReason(prelinkId, clientId, serviceLabel, sourceIso) : null;
-  const usable = open && appointment ? usablePackagesFor(clientId, serviceLabel, sourceIso, apptKey) : [];
+  const usable = open && appointment && !aula ? usablePackagesFor(clientId, serviceLabel, sourceIso, apptKey) : [];
   const usableIds = usable.map((p) => p.id).join('|');
   useEffect(() => {
     // Trocar o procedimento tira um pacote que não cobre o serviço novo (nunca escolhe outro sozinho).
@@ -320,7 +333,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
   const defaultDays = defaultPlan?.dueDays ?? null;
   const retNumber = Number(retDays);
   const model = svc?.followUp.model;
-  const needsDays = attended === 'sim' && ret === 'nao-marcado' && !!svc && model !== 'sem-retorno' && model !== 'recorrente';
+  const needsDays = !aula && attended === 'sim' && ret === 'nao-marcado' && !!svc && model !== 'sem-retorno' && model !== 'recorrente';
   const retPlan = needsDays && retNumber >= 1 && retNumber <= 365 && svc ? previewReturn(serviceLabel, appointment?.clientName ?? '', sourceIso, retNumber) : null;
   const reminderOn = saved.enabled.retorno !== false;
   const missedOn = saved.enabled.faltou !== false;
@@ -328,7 +341,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
   const missedBooked = existing ? `${appointment?.clientName ?? 'O cliente'} já tem outro horário de ${existing.a.service.toLowerCase()} marcado em ${shortDate(existing.iso)}, às ${existing.a.start}: a Orniplaty não chama para remarcar.` : '';
 
   // B3: horário do retorno nesta janela (regra única: o mesmo teste da Agenda).
-  const wantsBooking = attended === 'sim' && ret === 'ja-marcado' && !existing;
+  const wantsBooking = !aula && attended === 'sim' && ret === 'ja-marcado' && !existing;
   const duration = serviceByValue(service)?.minutes ?? 30;
   const bookingCheck =
   wantsBooking && booking.professional && booking.date && booking.time ?
@@ -485,8 +498,8 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
         setPackageError((err as Error).message);
         return;
       }
-      // Retorno: registra a escolha (vale o procedimento realizado; prazo só deste cliente).
-      registerClosure({
+      // Retorno: registra a escolha (vale o procedimento realizado; prazo só deste cliente). Aula em grupo: sem retorno.
+      if (!aula) registerClosure({
         clientName: appointment.clientName,
         iso: sourceIso,
         time: appointment.time ?? '',
@@ -496,7 +509,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
       });
     }
     // F-043: a observação do fechamento fica no agendamento (também em falta); o pacote usado fica ligado ao atendimento.
-    if (apptId) patchAppointment(sourceIso, apptId, { closingNote: closingNote || undefined, ...(usingPackage ? { packageSaleId: pkg } : {}) });
+    if (apptId && !aula) patchAppointment(sourceIso, apptId, { closingNote: closingNote || undefined, ...(usingPackage ? { packageSaleId: pkg } : {}) });
     onClosed?.(attended === 'sim');
     // W9b (J-07): o aviso segue o modo de envio salvo, como a frase dentro da janela (careLine).
     const retWho = mode === 'pausado' ? 'a mensagem fica pronta em Oportunidades para você mandar.' : mode === 'supervisionado' ? 'a mensagem aparece em Oportunidades para você aprovar.' : 'a Orniplaty cuida disso.';
@@ -528,7 +541,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
       });
     } else {
       toast({
-        title: 'Atendimento fechado',
+        title: aula ? `Pagamento ${aulaWords.ofThe} salvo` : 'Atendimento fechado',
         description: attended !== 'sim' ? `Falta registrada para ${appointment.clientName}.${missedOn ? missedBooked ? ` ${missedBooked}` : ' A Orniplaty vai chamar para remarcar.' : ''}` : `${money}${retLine}`
       });
     }
@@ -585,7 +598,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
       open={open}
       onClose={onClose}
       size="lg"
-      title="Fechar atendimento"
+      title={aula ? `Pagamento ${aulaWords.ofThe}` : 'Fechar atendimento'}
       description={`${appointment.clientName} · ${appointment.service} · ${appointment.when}${appointment.professional ? ` · ${appointment.professional}` : ''}`}
       footer={
       <div className="flex flex-col gap-2">
@@ -599,7 +612,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
               Cancelar
             </Button>
             <Button onClick={confirm} disabled={paymentMissing} aria-describedby={paymentMissing ? 'fechar-pagamento-motivo' : undefined}>
-              {wantsBooking ? 'Fechar e marcar retorno' : 'Fechar atendimento'}
+              {aula ? 'Salvar pagamento' : wantsBooking ? 'Fechar e marcar retorno' : 'Fechar atendimento'}
             </Button>
           </ModalActions>
         </div>
@@ -611,6 +624,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
             O atendimento começa às {appointment.time}. Você confirmou que ele já aconteceu.
           </NoticeInline>
         }
+        {!aula &&
         <div>
           {/* P4 (28/10/2026): `size="md"` + 2 colunas = um cartão por linha no celular (< 640 px), lado a lado acima; "Compareceu" não quebra no meio. */}
           <ChoiceCards label="O cliente compareceu?" columns={2} options={ATTENDED} value={attended} onChange={(v) => setAttended(v as 'sim' | 'nao')} />
@@ -623,11 +637,13 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
             </p>
           }
         </div>
+        }
 
         {attended === 'sim' &&
         <>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Select
+              {!aula &&
+            <Select
               label="Procedimento realizado"
               options={serviceOptions}
               value={service || undefined}
@@ -638,7 +654,8 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
                 // Vale o procedimento realizado: o Retorno passa a seguir o serviço novo.
                 fillReturn(v, serviceOptions.find((o) => o.value === v)?.label ?? '');
               }} />
-            
+
+            }
               {!usingPackage &&
             <div>
                   <Input
@@ -726,7 +743,8 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
               </section>
           }
 
-            <div className="flex flex-col gap-3">
+            {!aula &&
+          <div className="flex flex-col gap-3">
               <ChoiceCards
               label="Retorno"
               helperText="Quando este cliente deve voltar? A Orniplaty usa essa data para chamar o cliente na hora certa."
@@ -850,6 +868,7 @@ export function FecharAtendimentoModal({ open, onClose, appointment, onClosed }:
                 </Card>
             }
             </div>
+          }
 
             {usingPackage ?
           <Card padding="md" as="section" aria-label="Cobrança da sessão">

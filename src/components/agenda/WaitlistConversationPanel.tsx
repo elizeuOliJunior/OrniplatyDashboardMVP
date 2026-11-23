@@ -34,8 +34,12 @@ import type { OfferText } from '../../data/waitlistPrefs';
  * (`KEEPS_CONVERSATION_TEXT`, a mesma frase da janela de mensagens aprovadas; é o que `sendTeamMessage` e
  * `sendTeamTemplate` fazem). A frase que estava ali ("Para mudar o texto…" / "Esta conversa está parada…") foi para o "i"
  * ao lado, palavra por palavra. Nada muda no envio.
+ *
+ * CONTRATO NOVO (aulas em grupo, 23/11/2026; lote G6b): `message` opcional troca o texto da mensagem pronta (janela de
+ * 24 h aberta). Usado por "Chamar" na janela do dia de uma turma ("Abriu uma vaga em ‹serviço›, ‹dia›, às ‹hora›. Quer
+ * entrar?"). Sem `message`, nada muda. Com a janela fechada continua a mensagem aprovada de sempre.
  */
-export type WaitlistChatTarget = {clientId: string;offer: OfferText;};
+export type WaitlistChatTarget = {clientId: string;offer: OfferText;message?: string;};
 
 /** I1 (item 17): texto do envio que não saiu, pelo motivo devolvido por `sendTeamMessage`. */
 const notSentText = (reason?: string) =>
@@ -65,7 +69,7 @@ function OfferThread({ target, onClose, onSent }: {target: WaitlistChatTarget;on
   const summary = conversationSummaries[clientId] ?? { name: offer.clientName, phone: '', recordPath: '/clientes', fields: [] };
   const closed = windowOf(clientId).band === 'fechada';
   const tpl = MESSAGE_TEMPLATES.find((t) => t.name === WAITLIST_TEMPLATE);
-  const ready = closed && tpl ? fillTemplate(tpl.body, offerTemplateValues(offer)) : offerMessage(offer);
+  const ready = closed && tpl ? fillTemplate(tpl.body, offerTemplateValues(offer)) : target.message ?? offerMessage(offer);
 
   const done = (how: 'mensagem' | 'aprovada') => {
     setSent(true);

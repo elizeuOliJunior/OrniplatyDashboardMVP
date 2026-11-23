@@ -82,7 +82,7 @@ export function AgendaPeriodNumbers({ view, currentIso, professionalIds }: Props
         value={n.total}
         format="number"
         description={when}
-        info="Horários marcados no período e nos profissionais escolhidos na barra da agenda, menos os cancelados. Concluídos e faltas entram. Cada aula em grupo conta uma vez." />
+        info="Horários marcados no período e nos profissionais escolhidos na barra da agenda, menos os cancelados. Concluídos e faltas entram. Cada dia de turma conta uma vez." />
       
       <KpiStatCard
         size="sm"

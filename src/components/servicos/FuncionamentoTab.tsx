@@ -36,6 +36,9 @@ import { hasActiveGroupService, useServices } from '../../data/servicesStore';
 import { useServiceConflicts } from '../../data/serviceConflicts';
 import { LOCAL_SUGGESTIONS, NATIONAL_HOLIDAYS, scopeLabel, setClinicDateMeta, useClinicDateMeta } from '../../data/clinicCalendar';
 import type { HolidayScope } from '../../data/clinicCalendar';
+import { aulaChangeMessage, aulasOn, cancelAula, cancelGivesMakeup, useAulasVersion } from '../../data/aulas';
+import type { Aula } from '../../data/aulas';
+import { noteAulaChange } from '../../data/conflictCases';
 
 /* ───────────── utilidades ───────────── */
 
@@ -65,19 +68,64 @@ function apptsOn(appointments: Record<string, {status: string;clientName: string
  * W9b (12/11/2026, A3-24): `offers` = vagas da lista de espera com oferta em andamento (ou aceita, faltando marcar) que a
  * mudança deixa fora do expediente. Entram na mesma lista, com o que fazer depois de salvar.
  */
-function ConflictAlert({ conflicts, title, ack, onAck, offers = [] }: {conflicts: ScheduleConflict[];title: string;ack?: boolean;onAck?: (v: boolean) => void;offers?: OfferHit[];}) {
+function ConflictAlert({ conflicts, title, ack, onAck, offers = [], aulas = [] }: {conflicts: ScheduleConflict[];title: string;ack?: boolean;onAck?: (v: boolean) => void;offers?: OfferHit[];aulas?: Aula[];}) {
   const offerPart = offers.length ? `${offers.length} ${offers.length === 1 ? 'vaga oferecida pela lista de espera' : 'vagas oferecidas pela lista de espera'}` : '';
-  const head = conflicts.length ? `${conflicts.length} ${title}${offerPart ? `, e ${offerPart}` : ''}` : `${offerPart} ${offers.length === 1 ? 'fica fora do expediente' : 'ficam fora do expediente'}`;
+  // G3 (A1, CONTRATO NOVO, aulas em grupo): as aulas da data fechada entram NO MESMO aviso e são canceladas ao salvar.
+  // G5 (aulas em grupo): texto neutro (pode haver turmas de vários serviços).
+  const aulaPart = aulas.length ? `${aulas.length} ${aulas.length === 1 ? 'turma não acontece' : 'turmas não acontecem'}` : '';
+  const base = conflicts.length ? `${conflicts.length} ${title}${offerPart ? `, e ${offerPart}` : ''}` : offerPart ? `${offerPart} ${offers.length === 1 ? 'fica fora do expediente' : 'ficam fora do expediente'}` : '';
+  const head = base && aulaPart ? `${base}; ${aulaPart}` : base || `${aulaPart.charAt(0).toUpperCase()}${aulaPart.slice(1)} nesta data`;
+  const people = aulas.reduce((n, a) => n + a.clients.filter((c) => c.state !== 'avisou').length, 0);
+  const keep = conflicts.length || offers.length ? `Nada será cancelado nem movido. ${conflicts.length ? 'Eles continuam na agenda, marcados como conflito, até você remarcar.' : ''}${offers.length ? `${conflicts.length ? ' ' : ''}A oferta da vaga continua aberta: depois de salvar, cancele a oferta em Agenda › Lista de espera e avise o cliente.` : ''}` : '';
+  const aulaNote = aulas.length ?
+  `Ao salvar, ${aulas.length === 1 ? 'essa turma é cancelada' : 'essas turmas são canceladas'} nesta data e ${people === 1 ? 'o cliente é avisado' : people ? `os ${people} clientes são avisados` : 'não há clientes para avisar'}, como ao cancelar pela Agenda.${cancelGivesMakeup() && people ? ' Os clientes ganham reposição.' : ''}` :
+  '';
   return (
     <ConflictNotice
       className="mt-4"
       title={head}
-      items={[...conflicts.map((c) => ({ key: c.appt.id, name: c.appt.clientName, when: `${mediumDayLabel(c.iso)} ${c.appt.start}–${c.appt.end}` })), ...offers]}
-      footnote={`Nada será cancelado nem movido. ${conflicts.length ? 'Eles continuam na agenda, marcados como conflito, até você remarcar.' : ''}${offers.length ? `${conflicts.length ? ' ' : ''}A oferta da vaga continua aberta: depois de salvar, cancele a oferta em Agenda › Lista de espera e avise o cliente.` : ''}`}
+      items={[
+      ...conflicts.map((c) => ({ key: c.appt.id, name: c.appt.clientName, when: `${mediumDayLabel(c.iso)} ${c.appt.start}–${c.appt.end}` })),
+      ...offers,
+      ...aulas.map((a) => {
+        const n = a.clients.filter((c) => c.state !== 'avisou').length;
+        return { key: a.key, name: `Turma de ${a.serviceName}`, when: `${mediumDayLabel(a.iso)} ${a.start}–${a.end}, ${n} ${n === 1 ? 'cliente' : 'clientes'}` };
+      })]
+      }
+      footnote={[keep, aulaNote].filter(Boolean).join(' ')}
       ack={ack}
       onAck={onAck} />);
 
 
+}
+
+/**
+ * G3 (A1, CONTRATO NOVO, aulas em grupo): aulas que deixam de caber numa data especial. Fechado: todas as do dia;
+ * reduzido: as que terminam depois do novo horário. Ainda não feitas nem canceladas.
+ */
+function aulasHitByDate(date: string, kind: ClinicBlock['kind'], until?: string): Aula[] {
+  if (!date || kind === 'open') return [];
+  return aulasOn(date).filter((a) => !a.cancelled && !a.done && (kind === 'closed' || !!until && toMin(a.end) > toMin(until)));
+}
+
+/** Cancela as aulas pelo mesmo caminho de "Cancelar esta aula" (aviso pela automação ou "Falta avisar"). */
+function cancelAulasOfDate(aulas: Aula[], reason?: string): {text: string;notify: boolean;} {
+  let notify = false;
+  let people = 0;
+  aulas.forEach((a) => {
+    const warn = a.clients.filter((c) => c.state !== 'avisou');
+    people += warn.length;
+    const mode = noteAulaChange(
+      { key: a.key, id: a.id, serviceName: a.serviceName, iso: a.iso, start: a.start, professionalId: a.professionalId },
+      warn.map((c) => ({ clientId: c.clientId, name: c.name, message: aulaChangeMessage(c.name, a.serviceName, a.iso, a.start, null, reason) })),
+      { kind: 'cancelado' }
+    );
+    cancelAula(a.key, reason);
+    if (mode === 'avisar' && warn.length) notify = true;
+  });
+  const n = aulas.length;
+  const text = `${n === 1 ? '1 turma não acontece' : `${n} turmas não acontecem`}: ${people === 0 ? 'não havia clientes para avisar' : notify ? `${people === 1 ? 'o cliente está' : `os ${people} clientes estão`} em Falta avisar` : `a assistente avisou ${people === 1 ? 'o cliente' : `os ${people} clientes`}`}.`;
+  return { text, notify };
 }
 
 /** Cabeçalho padrão de cada seção: título, explicação de 1 linha e "Como isso afeta a agenda". */
@@ -229,6 +277,7 @@ type DateForm = {id?: string;date: string;type: string;until: string;from: strin
 function DataEspecialModal({ open, onClose, initial }: {open: boolean;onClose: () => void;initial: DateForm | null;}) {
   const metaAll = useClinicDateMeta();
   const toast = useToast();
+  const navigate = useGuardedNavigate();
   const agenda = useAgendaData();
   const blank: DateForm = { date: '', type: 'fechado', until: '13:00', from: '08:00', to: '12:00', reason: '', scope: 'clinica', yearly: false, reasonShared: false };
   const [form, setForm] = useState<DateForm>(blank);
@@ -285,8 +334,11 @@ function DataEspecialModal({ open, onClose, initial }: {open: boolean;onClose: (
     return offersHitBy({ clinicBlocks: [...others, { ...candidate(), id: 'novo' }] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, form, rangeError]);
-  const mustAck = impact.length > 0 || offerImpact.length > 0;
-  useEffect(() => setAck(false), [impact.length, offerImpact.length]);
+  // G3 (A1): aulas da data que deixam de caber (mesmo aviso, canceladas ao salvar).
+  useAulasVersion();
+  const aulaImpact = open && !rangeError ? aulasHitByDate(form.date, kindNow, form.until) : [];
+  const mustAck = impact.length > 0 || offerImpact.length > 0 || aulaImpact.length > 0;
+  useEffect(() => setAck(false), [impact.length, offerImpact.length, aulaImpact.length]);
   const sameDay = form.date ? apptsOn(agenda.appointments, form.date).length : 0;
 
   const save = () => {
@@ -294,9 +346,19 @@ function DataEspecialModal({ open, onClose, initial }: {open: boolean;onClose: (
     if (dateError || rangeError) return;
     if (mustAck && !ack) return;
     const b = candidate();
+    // G3 (A1): as aulas atingidas são canceladas ANTES de gravar a data (num dia fechado a aula só continua como registro de
+    // aula cancelada). O motivo só vai na mensagem ao cliente quando pode ser mostrado ("Mostrar o motivo ao cliente" ou o
+    // nome oficial do feriado nacional).
+    const aulaReason = b.reasonShared ? b.reason || undefined : b.kind === 'closed' ? b.publicLabel : undefined;
+    const aulas = aulaImpact.length ? cancelAulasOfDate(aulaImpact, aulaReason) : null;
     setClinicBlocks((list) => list.some((x) => x.id === b.id) ? list.map((x) => x.id === b.id ? b : x) : [...list, b]);
     setClinicDateMeta(b.id, { scope: form.scope, yearly: form.yearly, imported: (form.id ? metaAll[form.id]?.imported : false) ?? false });
-    toast({ title: form.id ? 'Data especial atualizada' : 'Data especial adicionada', description: `${shortDate(b.date)} · ${clinicBlockLabel(b)}` });
+    toast({
+      title: form.id ? 'Data especial atualizada' : 'Data especial adicionada',
+      description: `${shortDate(b.date)} · ${clinicBlockLabel(b)}${aulas ? `. ${aulas.text}` : ''}`,
+      ...(aulas ? { duration: 8000 } : {}),
+      ...(aulas?.notify ? { action: { label: 'Ver quem falta avisar', onClick: () => navigate('/agenda?secao=notificacoes') } } : {})
+    });
     onClose();
   };
 
@@ -368,7 +430,7 @@ function DataEspecialModal({ open, onClose, initial }: {open: boolean;onClose: (
           </div>
         }
         <Toggle checked={form.yearly} onCheckedChange={(v: boolean) => setForm((f) => ({ ...f, yearly: v }))} labelPosition="right" label={<span className="text-sm font-semibold text-text-primary">Repetir todo ano nesta data</span>} description="Para feriados de data fixa: a mesma data dos próximos anos segue esta regra (agenda e assistente)." />
-        <ConflictAlert conflicts={impact} offers={offerImpact} title={impact.length === 1 ? 'agendamento já marcado fica fora do expediente' : 'agendamentos já marcados ficam fora do expediente'} ack={ack} onAck={setAck} />
+        <ConflictAlert conflicts={impact} offers={offerImpact} aulas={aulaImpact} title={impact.length === 1 ? 'agendamento já marcado fica fora do expediente' : 'agendamentos já marcados ficam fora do expediente'} ack={ack} onAck={setAck} />
       </div>
     </AppModal>);
 
@@ -376,6 +438,7 @@ function DataEspecialModal({ open, onClose, initial }: {open: boolean;onClose: (
 
 function ImportarFeriadosModal({ open, onClose }: {open: boolean;onClose: () => void;}) {
   const toast = useToast();
+  const navigate = useGuardedNavigate();
   const { blocks } = useTeam();
   const agenda = useAgendaData();
   const upcoming = NATIONAL_HOLIDAYS.filter((h) => h.date >= TODAY_ISO);
@@ -390,7 +453,11 @@ function ImportarFeriadosModal({ open, onClose }: {open: boolean;onClose: () => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [open, picked.join('|'), blocks]
   );
-  useEffect(() => setAck(false), [impact.length]);
+  // G3 (A1): aulas dos feriados escolhidos (mesmo aviso; canceladas ao importar, com o nome oficial do feriado).
+  useAulasVersion();
+  const aulaImpact = open ? toCreate.flatMap((h) => aulasHitByDate(h.date, 'closed')) : [];
+  const mustAck = impact.length > 0 || aulaImpact.length > 0;
+  useEffect(() => setAck(false), [impact.length, aulaImpact.length]);
   useEffect(() => {
     if (open) setPicked(upcoming.filter((h) => !h.optional && !already(h.date)).map((h) => h.date));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -398,12 +465,22 @@ function ImportarFeriadosModal({ open, onClose }: {open: boolean;onClose: () => 
   const years = [...new Set(upcoming.map((h) => h.date.slice(0, 4)))];
 
   const apply = () => {
-    if (impact.length > 0 && !ack) return;
+    if (mustAck && !ack) return;
+    const aulaTexts = toCreate.map((h) => {
+      const list = aulaImpact.filter((a) => a.iso === h.date);
+      return list.length ? cancelAulasOfDate(list, h.name) : null;
+    }).filter(Boolean) as {text: string;notify: boolean;}[];
+    const nAulas = aulaImpact.length;
     // Nome oficial = texto PÚBLICO (D5); o motivo interno começa igual e pode ser editado.
     const created = toCreate.map((h) => ({ id: newId('fer'), date: h.date, kind: 'closed' as const, reason: h.name, publicLabel: h.name }));
     setClinicBlocks((list) => [...list, ...created]);
     created.forEach((b) => setClinicDateMeta(b.id, { scope: 'nacional', yearly: false, imported: true }));
-    toast({ title: `${created.length} ${created.length === 1 ? 'feriado importado' : 'feriados importados'}`, description: `${wordsNow().The} fica ${wordsNow().closed} nessas datas. Agendamentos já marcados não foram alterados.` });
+    toast({
+      title: `${created.length} ${created.length === 1 ? 'feriado importado' : 'feriados importados'}`,
+      description: `${wordsNow().The} fica ${wordsNow().closed} nessas datas. Agendamentos já marcados não foram alterados.${nAulas ? ` ${nAulas === 1 ? '1 turma não acontece' : `${nAulas} turmas não acontecem`} nessas datas, com os clientes avisados ou em Falta avisar.` : ''}`,
+      ...(nAulas ? { duration: 8000 } : {}),
+      ...(aulaTexts.some((t) => t.notify) ? { action: { label: 'Ver quem falta avisar', onClick: () => navigate('/agenda?secao=notificacoes') } } : {})
+    });
     onClose();
   };
 
@@ -419,7 +496,7 @@ function ImportarFeriadosModal({ open, onClose }: {open: boolean;onClose: () => 
           <Button variant="secondary" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={apply} disabled={picked.filter((d) => !already(d)).length === 0 || impact.length > 0 && !ack}>
+          <Button onClick={apply} disabled={picked.filter((d) => !already(d)).length === 0 || mustAck && !ack}>
             Importar {picked.filter((d) => !already(d)).length || ''}
           </Button>
         </ModalActions>
@@ -462,7 +539,7 @@ function ImportarFeriadosModal({ open, onClose }: {open: boolean;onClose: () => 
           </ul>
         </fieldset>
       )}
-      <ConflictAlert conflicts={impact} title={impact.length === 1 ? 'agendamento já marcado fica fora do expediente com estes feriados' : 'agendamentos já marcados ficam fora do expediente com estes feriados'} ack={ack} onAck={setAck} />
+      <ConflictAlert conflicts={impact} aulas={aulaImpact} title={impact.length === 1 ? 'agendamento já marcado fica fora do expediente com estes feriados' : 'agendamentos já marcados ficam fora do expediente com estes feriados'} ack={ack} onAck={setAck} />
     </AppModal>);
 
 }
@@ -853,7 +930,7 @@ function RegrasCard() {
       const nextMakeup = makeupOf(mk);
       setMakeupRules(nextMakeup);
       setMk(makeupDraftOf(nextMakeup));
-      parts.push('A reposição de aula já segue as novas regras.');
+      parts.push('A reposição já segue as novas regras.');
     }
     setBookingRules(next);
     setR(draftOf(next));
@@ -912,13 +989,13 @@ function RegrasCard() {
           // CONTRATO NOVO (aulas em grupo, 23/11/2026): mesmo padrão das regras acima (frases com campos no meio).
           <section aria-labelledby="func-reposicao-titulo" className="flex flex-col gap-4 border-t border-border pt-4">
               <h3 id="func-reposicao-titulo" className="text-sm font-bold text-text-primary">
-                Reposição de aula
+                Reposição
               </h3>
               <Toggle
               checked={mk.onBusinessCancel}
               onCheckedChange={(v: boolean) => setMk((x) => ({ ...x, onBusinessCancel: v }))}
               labelPosition="right"
-              label={<span className="text-sm font-semibold text-text-primary">Aula cancelada {wordsNow().by} dá direito a reposição</span>} />
+              label={<span className="text-sm font-semibold text-text-primary">Dia de turma cancelado {wordsNow().by} dá direito a reposição</span>} />
             
               <Toggle
               checked={mk.onClientNotice}
@@ -944,7 +1021,7 @@ function RegrasCard() {
                   <span>dias.</span>
                 </div> :
 
-            <p className="text-sm text-text-secondary">Sem reposição: a aula cancelada só é registrada e avisada.</p>
+            <p className="text-sm text-text-secondary">Sem reposição: o dia de turma cancelado só é registrado e avisado.</p>
             }
             </section>
           }

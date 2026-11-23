@@ -14,10 +14,25 @@ import { getTeam } from './availability';
 import type { CalAppointment } from './agendaStore';
 import type { ServiceConflictKind, ServiceConflictRecord } from './serviceConflicts';
 import { toMinutes } from '../utils/time';
-import { occupancyOf, turmaWhen, turmasOfService } from './turmas';
+import { enrollmentsOf, turmaWhen, turmasOfService } from './turmas';
+import { dayWords } from './turmaWords';
+import type { TurmaWordId } from './turmaWords';
 
-/** G2 (aulas em grupo, 23/11/2026; CONTRATO NOVO): `turmas` = turmas ATIVAS do serviço em grupo, com quantos clientes cada uma tem. */
-export type ServiceArchiveImpact = {future: number;activePackages: number;waitlist: number;paymentRules: number;knowledgeFields: number;turmas?: {when: string;professional: string;clients: number;}[];};
+/**
+ * G2 (aulas em grupo, 23/11/2026; CONTRATO NOVO): `turmas` = turmas ATIVAS do serviço em grupo, com quantos clientes cada uma tem.
+ * G4 (C): clientes DISTINTOS — `fixos` (em todas as aulas) e `avulsos` (só em aulas de datas futuras, sem contar quem já é
+ * fixo). Antes era o número de inscrições que ocupam vaga, lido como se todos estivessem na mesma aula ("5 clientes" numa
+ * turma de 4 vagas).
+ */
+export type ServiceArchiveImpact = {future: number;activePackages: number;waitlist: number;paymentRules: number;knowledgeFields: number;turmas?: {when: string;professional: string;fixos: number;avulsos: number;clients: number;}[]; /** G5 (CONTRATO NOVO): palavra de cada dia da turma do serviço. */turmaWord?: TurmaWordId;};
+
+/** G4 (C; CONTRATO NOVO, aulas em grupo): clientes distintos da turma, fixos e avulsos de datas futuras. */
+function turmaClients(turmaId: string) {
+  const list = enrollmentsOf(turmaId);
+  const fixos = new Set(list.filter((e) => e.kind === 'fixo').map((e) => e.clientId));
+  const avulsos = new Set(list.filter((e) => e.kind === 'avulso' && (e.date ?? '') >= TODAY_ISO && !fixos.has(e.clientId)).map((e) => e.clientId));
+  return { fixos: fixos.size, avulsos: avulsos.size, clients: fixos.size + avulsos.size };
+}
 
 const ofService = (name: string, id: string) => {
   const r = resolveService(name);
@@ -48,7 +63,8 @@ export function serviceArchiveImpact(s: ServiceItem): ServiceArchiveImpact {
     waitlist: waitlist.filter((e) => ofService(e.service, s.id)).length,
     paymentRules,
     knowledgeFields,
-    turmas: turmasOfService(s.id).map((t) => ({ when: turmaWhen(t), professional: getTeam().members.find((m) => m.id === t.professionalId)?.name ?? '', clients: occupancyOf(t.id) }))
+    turmaWord: s.group?.word,
+    turmas: turmasOfService(s.id).map((t) => ({ when: turmaWhen(t), professional: getTeam().members.find((m) => m.id === t.professionalId)?.name ?? '', ...turmaClients(t.id) }))
   };
 }
 
@@ -58,10 +74,16 @@ const n = (v: number, one: string, many: string) => `${v} ${v === 1 ? one : many
 export function serviceArchiveLines(i: ServiceArchiveImpact): string[] {
   // G2 (aulas em grupo; CONTRATO NOVO): cada turma ativa, com quantos clientes tem, e o que acontece com as aulas.
   const turmas = i.turmas ?? [];
+  // G5 (CONTRATO NOVO): a palavra do serviço ("as aulas" / "os treinos").
+  const w = dayWords(i.turmaWord);
   const turmaLines = turmas.length ?
   [
-  ...turmas.map((t) => `Turma ${t.when.charAt(0).toLowerCase()}${t.when.slice(1)}${t.professional ? `, com ${t.professional}` : ''}: ${n(t.clients, 'cliente', 'clientes')}.`),
-  `As aulas ${turmas.length === 1 ? 'desta turma deixam' : 'destas turmas deixam'} de ser oferecidas e saem da Agenda. Nada é apagado: as turmas e os clientes voltam se você reativar o serviço.`] :
+  ...turmas.map((t) => {
+    // G4 (C): fixos e avulsos separados, para não parecer que todos estão na mesma aula.
+    const parts = [t.fixos > 0 && n(t.fixos, 'cliente fixo', 'clientes fixos'), t.avulsos > 0 && (t.avulsos === 1 ? `1 avulso marcado para ${w.pick('uma próxima', 'um próximo')} ${w.one}` : `${t.avulsos} avulsos marcados para ${w.pick('próximas', 'próximos')} ${w.many}`)].filter(Boolean);
+    return `Turma ${t.when.charAt(0).toLowerCase()}${t.when.slice(1)}${t.professional ? `, com ${t.professional}` : ''}: ${parts.length ? parts.join(' e ') : 'nenhum cliente'}.`;
+  }),
+  `${w.pick('As', 'Os')} ${w.many} ${turmas.length === 1 ? 'desta turma deixam' : 'destas turmas deixam'} de ser ${w.pick('oferecidas', 'oferecidos')} e saem da Agenda. Nada é apagado: as turmas e os clientes voltam se você reativar o serviço.`] :
 
   [];
   return [

@@ -58,6 +58,15 @@ import { ArchiveConfirm } from './ArchiveConfirm';
 import { requestLeave } from '../ui/UnsavedChanges';
 import { askToDiscard } from '../../data/dirtyGuard';
 import { occupancyOf, turmaWhen, turmasOfService, useTurmas } from '../../data/turmas';
+import { TURMA_WORD_DEFAULT, TURMA_WORD_OPTIONS } from '../../data/turmaWords';
+import { NovoProfissionalHost } from './NovoProfissionalHost';
+// CONTRATO NOVO (seletor com cadastro, 23/11/2026; lote SC2a)
+import { SelectComCadastro } from '../ui/SelectComCadastro';
+import { CategoriasModal } from './CategoriasModal';
+import { NovoServicoHost } from './NovoServicoHost';
+import { setCategories } from '../../data/servicesStore';
+import { useToast } from '../ui/Toast';
+import type { TurmaWordId } from '../../data/turmaWords';
 
 type Props = {
   open: boolean;
@@ -75,7 +84,10 @@ type Props = {
   onNewEvaluation?: () => void;
   /** Serviço novo que já abre com este tipo de atendimento. */
   initialKind?: ServiceKind;
-  onManageCategories: () => void;
+  /** CONTRATO NOVO (seletor com cadastro, 23/11/2026): nome já preenchido no serviço novo (texto digitado no seletor que abriu a janela). */
+  initialName?: string;
+  /** G5b: não usado (o botão "Gerenciar categorias" saiu da janela). Fica opcional só para quem ainda passa o valor. */
+  onManageCategories?: () => void;
   /** aba que abre primeiro (ex.: vindo de IA Orniplaty › Conhecimento) */
   initialTab?: string;
   /**
@@ -104,8 +116,8 @@ type Form = {
   k: ServiceItem['knowledge'];
   /** Lote F: exceções de pagamento deste serviço ('padrao' = segue IA Orniplaty › Empresa). */
   pay: ServicePayment;
-  /** CONTRATO NOVO (aulas em grupo, 23/11/2026): "Atendimento em grupo" e "Vagas por horário" (2 a 50). */
-  group: boolean;
+  /** CONTRATO NOVO (aulas em grupo, 23/11/2026): "Vagas por horário" (2 a 50). G5: em grupo = tipo "Turma"; `word` = como chama cada dia. */
+  word: TurmaWordId;
   capacity: string;
 };
 
@@ -128,10 +140,18 @@ function kindExample(kind: ServiceKind, name: string) {
       return 'quero marcar a próxima sessão';
     case 'retorno':
       return 'preciso voltar para o retorno';
-    case 'aula':
-      return 'quero marcar uma aula';
+    // G5 (CONTRATO NOVO, aulas em grupo): Turma usa o nome do serviço.
+    case 'turma':
+      return `quero marcar ${name.trim() ? name.trim().toLowerCase() : 'pilates em grupo'}`;
   }
 }
+
+/**
+ * CONTRATO NOVO (janela com etapas, 23/11/2026): só na CRIAÇÃO, as abas viram etapas nesta ordem. "Próximo" confere só os
+ * obrigatórios da aba atual; as abas continuam clicáveis (pular para frente não confere nada); "Adicionar serviço" confere
+ * tudo, como antes. Na edição nada muda.
+ */
+const CREATE_STEPS = ['basico', 'quem-faz', 'agenda', 'pagamento', 'assistente'];
 
 const SECTION_TITLE = 'text-sm font-bold text-text-primary';
 const SECTION_HELP = 'mt-0.5 text-xs text-text-secondary';
@@ -180,7 +200,7 @@ function FollowUpImpact({ serviceName, ack, onAck, onCount, show = true, classNa
  * L11 (16/11/2026): os avisos de quem a mudança afeta ficam logo abaixo do campo que os causou; o motivo do "Salvar"
  * desativado fica no rodapé, à vista; "Falta resolver" no lugar de "Conflitos a resolver"; abas `sm`.
  */
-export function ServicoModal({ open, onClose, editing, categories, services, members, hasHistory, onSave, onArchive, onManageCategories, initialTab, onGoDefault, onNewEvaluation, initialKind }: Props) {
+export function ServicoModal({ open, onClose, editing, categories, services, members, hasHistory, onSave, onArchive, initialTab, onGoDefault, onNewEvaluation, initialKind, initialName }: Props) {
   const navigate = useNavigate();
   const library = useSavedStore(automacoesStore).models;
   /** Lote F: o padrão de pagamento vem da Empresa SALVA. */
@@ -188,7 +208,7 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
   const sendMode = useSavedAutomationMode();
   /** Ajustes do Lote B (B5): "Ajustar as mensagens" fica fechado por padrão. */
   const [showSteps, setShowSteps] = useState(false);
-  const blank = (): Form => ({ name: '', categoryId: categories[0]?.id ?? '', kind: initialKind ?? 'procedimento', modality: 'presencial', minutes: '', priceMode: 'fixo', price: '', model: 'manutencao', due: '30', sessions: '', after: '', steps: stepsFor('manutencao', 30, library), pros: [], k: blankKnowledge(), pay: blankServicePayment(), group: false, capacity: '' });
+  const blank = (): Form => ({ name: (initialName ?? '').trim().slice(0, 200), categoryId: categories[0]?.id ?? '', kind: initialKind ?? 'procedimento', modality: 'presencial', minutes: '', priceMode: 'fixo', price: '', model: 'manutencao', due: '30', sessions: '', after: '', steps: stepsFor('manutencao', 30, library), pros: [], k: blankKnowledge(), pay: blankServicePayment(), word: TURMA_WORD_DEFAULT, capacity: '' });
   const [form, setForm] = useState<Form>(blank);
   /** Serviço novo: até a pessoa escolher, o modelo segue a sugestão da Orniplaty. */
   const [modelTouched, setModelTouched] = useState(false);
@@ -205,6 +225,19 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
   const [followCount, setFollowCount] = useState(0);
   /** CONTRATO NOVO (aulas em grupo, 23/11/2026): "Entendi" do aviso de vagas abaixo do número de inscritos. */
   const [ackCapacity, setAckCapacity] = useState(false);
+  /** CONTRATO NOVO (janela com etapas, 23/11/2026): abas já conferidas pelo "Próximo" e "Cadastrar profissional" por cima. */
+  const [checkedTabs, setCheckedTabs] = useState<string[]>([]);
+  const [newPro, setNewPro] = useState(false);
+  /**
+   * CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Nova categoria" abre a MESMA janela do "+ Nova categoria" da aba
+   * Serviços (`CategoriasModal focusNew`); "Cadastrar serviço" em "Qual avaliação" abre "Novo serviço" por cima, já como
+   * Avaliação (`NovoServicoHost`, montado só enquanto aberto: a janela do serviço não se repete sem fim).
+   */
+  const toast = useToast();
+  const [newCategory, setNewCategory] = useState(false);
+  const categoriesAtOpen = useRef<string[]>([]);
+  const [newEval, setNewEval] = useState<{mounted: boolean;open: boolean;typed: string;}>({ mounted: false, open: false, typed: '' });
+  const tabsTopRef = useRef<HTMLDivElement>(null);
 
   /** Formulário como abriu (para saber se houve alteração ao sair por "Mudar o padrão" sem trocar de tela). */
   const baselineRef = useRef('');
@@ -229,7 +262,7 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
       pros: [...s.professionalIds],
       k: { ...s.knowledge, synonyms: [...s.knowledge.synonyms], faqs: s.knowledge.faqs.map((f) => ({ ...f })) },
       pay: JSON.parse(JSON.stringify(s.payment ?? blankServicePayment())) as ServicePayment,
-      group: !!s.group,
+      word: s.group?.word ?? TURMA_WORD_DEFAULT,
       capacity: s.group ? String(s.group.capacity) : ''
     } :
     blank();
@@ -247,6 +280,10 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
     setAckFollow(false);
     setFollowCount(0);
     setAckCapacity(false);
+    setCheckedTabs([]);
+    setNewPro(false);
+    setNewCategory(false);
+    setNewEval({ mounted: false, open: false, typed: '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -259,6 +296,8 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
   const sessions = Number(form.sessions);
   const after = Number(form.after);
   const capacity = Number(form.capacity);
+  /** G5 (CONTRATO NOVO, aulas em grupo): o serviço é em grupo se e só se o tipo é Turma. */
+  const isTurma = form.kind === 'turma';
   const needsDue = form.model === 'manutencao' || form.model === 'serie' || form.model === 'revisao';
   const errors = {
     name: !form.name.trim() ? 'Informe o nome do serviço.' : undefined,
@@ -270,7 +309,7 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
     after: form.model === 'serie' && form.after && !(after >= 1 && after <= 365) ? 'Use de 1 a 365 dias, ou deixe em branco.' : undefined,
     pros: form.pros.length === 0 ? 'Escolha ao menos um profissional.' : undefined,
     // CONTRATO NOVO (aulas em grupo, 23/11/2026)
-    capacity: form.group && !(Number.isInteger(capacity) && capacity >= 2 && capacity <= 50) ? 'Use de 2 a 50 vagas.' : undefined,
+    capacity: isTurma && !(Number.isInteger(capacity) && capacity >= 2 && capacity <= 50) ? 'Use de 2 a 50 vagas.' : undefined,
     pagamento: Object.keys(servicePaymentErrors(form.pay, { priceMode: form.priceMode }, empresa)).length ? 'Confira a aba Pagamento.' : undefined
   };
   const payErrors = servicePaymentErrors(form.pay, { priceMode: form.priceMode }, empresa);
@@ -339,7 +378,7 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
       active: editing?.active ?? true,
       knowledge: { ...form.k, description: form.k.description.trim(), faqs: form.k.faqs.filter((f) => f.question.trim() || f.answer.trim()) },
       payment: form.pay,
-      group: form.group ? { capacity: capacity || 0 } : null
+      group: isTurma ? { capacity: capacity || 0, word: form.word } : null
     }),
     [editing, form, minutes, price, followUp, capacity]
   );
@@ -378,23 +417,23 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
     hadFollow.current = has;
   }, [followChanged, followCount]);
   /**
-   * CONTRATO NOVO (aulas em grupo, 23/11/2026). Desligar o atendimento em grupo com turmas ativas não salva (aviso logo
-   * abaixo da chave). Baixar as vagas abaixo dos inscritos de uma turma pode, com o aviso que nomeia as turmas e "Entendi";
+   * CONTRATO NOVO (aulas em grupo, 23/11/2026). G5: mudar o tipo para outro que não Turma com turmas ativas não salva (aviso logo
+   * abaixo do tipo). Baixar as vagas abaixo dos inscritos de uma turma pode, com o aviso que nomeia as turmas e "Entendi";
    * ninguém sai da turma sozinho (mesma regra de 11/11 para duração e arquivar).
    */
   const turmasState = useTurmas();
   const activeTurmas = editing ? turmasOfService(editing.id, true, turmasState) : [];
-  const blockedByGroupOff = !!editing && !form.group && activeTurmas.length > 0;
+  const blockedByGroupOff = !!editing && !isTurma && activeTurmas.length > 0;
   const capacityHits =
-  form.group && !errors.capacity ? activeTurmas.map((t) => ({ t, n: occupancyOf(t.id, turmasState) })).filter((x) => x.n > capacity) : [];
+  isTurma && !errors.capacity ? activeTurmas.map((t) => ({ t, n: occupancyOf(t.id, turmasState) })).filter((x) => x.n > capacity) : [];
   const capacityKey = capacityHits.map((x) => `${x.t.id}:${x.n}`).join(',') + `|${capacity}`;
   useEffect(() => setAckCapacity(false), [capacityKey]);
   const blockedByCapacity = capacityHits.length > 0 && !ackCapacity;
   /** Motivo do "Salvar" desativado, em texto visível ao lado dos botões. */
   const blockedReason = blockedByGroupOff ?
   tab === 'basico' ?
-  'Para salvar, ligue de novo o “Atendimento em grupo” ou arquive as turmas.' :
-  'Para salvar, veja o aviso do “Atendimento em grupo” na aba Básico.' :
+  'Para salvar, volte o tipo para “Turma” ou arquive as turmas.' :
+  'Para salvar, veja o aviso do “Tipo de atendimento” na aba Básico.' :
   blockedByCapacity ?
   tab === 'basico' ?
   'Para salvar, marque “Entendi” no aviso abaixo de “Vagas por horário”.' :
@@ -440,7 +479,47 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
     setSynonymDraft('');
   };
 
-  const err = (key: keyof typeof errors) => submitted ? errors[key] : undefined;
+  const tabOfKey = (key: keyof typeof errors) => tabOfError.find(([k]) => k === key)?.[1];
+  const err = (key: keyof typeof errors) => submitted || checkedTabs.includes(tabOfKey(key) ?? '') ? errors[key] : undefined;
+  // CONTRATO NOVO (janela com etapas, 23/11/2026)
+  const isCreate = !editing;
+  const stepIndex = CREATE_STEPS.indexOf(tab);
+  const isLastStep = stepIndex === CREATE_STEPS.length - 1;
+  /** CONTRATO NOVO (janela de tamanho único, 23/11/2026): o miolo volta ao topo na mesma hora da troca (antes, um
+   *  instante depois), para a aba nova nunca aparecer rolada e depois pular. Vale também para o clique na aba. */
+  const scrollTop = () => {
+    const box = tabsTopRef.current?.closest('.overflow-y-auto') as HTMLElement | null;
+    box?.scrollTo({ top: 0 });
+  };
+  /**
+   * CONTRATO NOVO (janela com etapas, 23/11/2026; lote SC3): no celular a barra de abas rola para o lado e o "Próximo"/
+   * "Voltar" trocava a etapa sem trazer a aba escolhida para a vista (em 390 px, "Pagamento" e "O que a assistente explica"
+   * ficavam fora da barra). Agora a barra rola só o necessário para a aba escolhida aparecer. Nada muda no computador.
+   */
+  useEffect(() => {
+    const active = tabsTopRef.current?.parentElement?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    let bar = active?.parentElement ?? null;
+    while (bar && bar !== tabsTopRef.current?.parentElement && bar.scrollWidth <= bar.clientWidth) bar = bar.parentElement;
+    if (!active || !bar || bar.scrollWidth <= bar.clientWidth) return;
+    const a = active.getBoundingClientRect();
+    const b = bar.getBoundingClientRect();
+    if (a.left < b.left) bar.scrollLeft -= b.left - a.left + 8;else
+    if (a.right > b.right) bar.scrollLeft += a.right - b.right + 8;
+  }, [tab]);
+  const nextStep = () => {
+    setCheckedTabs((l) => l.includes(tab) ? l : [...l, tab]);
+    if (tabOfError.some(([k, t]) => t === tab && errors[k])) return;
+    if (stepIndex >= 0 && stepIndex < CREATE_STEPS.length - 1) {
+      scrollTop();
+      openTab(CREATE_STEPS[stepIndex + 1]);
+    }
+  };
+  const prevStep = () => {
+    if (stepIndex > 0) {
+      scrollTop();
+      openTab(CREATE_STEPS[stepIndex - 1]);
+    }
+  };
   /** Sair da janela para outra tela (ex.: "Mudar o padrão"): com alterações, passa pelo aviso de alterações não salvas. */
   const leaveTo = (to: string) =>
   requestLeave(() => {
@@ -482,6 +561,7 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
         onClose={onClose}
         dirtyValue={form}
         size="lg"
+        steadyHeight
         title={editing ? `Editar ${editing.name}` : 'Novo serviço'}
         description="A assistente só oferece o que está cadastrado aqui e explica o serviço com o que você escrever na aba “O que a assistente explica”."
         footer={
@@ -503,40 +583,118 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
               <Button variant="secondary" onClick={onClose}>
                 Cancelar
               </Button>
-              <Button onClick={save} disabled={blockedByChange || blockedByFollow || blockedByGroupOff || blockedByCapacity} aria-describedby={blockedReason ? 'sv-confirmar-aviso' : undefined}>
-                {editing ? 'Salvar' : 'Adicionar serviço'}
-              </Button>
+              {/* CONTRATO NOVO (janela com etapas, 23/11/2026): Cancelar · Voltar · Próximo/Adicionar, só na criação. O texto
+                 escondido tira o "Voltar" da regra de botão que fecha a janela (AppModal) e dá nome completo ao leitor de tela. */}
+              {isCreate && stepIndex > 0 &&
+            <Button variant="secondary" onClick={prevStep}>
+                  Voltar<span className="sr-only"> para a etapa anterior</span>
+                </Button>
+            }
+              {isCreate && !isLastStep ?
+            <Button onClick={nextStep}>Próximo</Button> :
+
+            <Button onClick={save} disabled={blockedByChange || blockedByFollow || blockedByGroupOff || blockedByCapacity} aria-describedby={blockedReason ? 'sv-confirmar-aviso' : undefined}>
+                  {editing ? 'Salvar' : 'Adicionar serviço'}
+                </Button>
+            }
             </ModalActions>
           </div>
         }>
         
         {/* L11 (meta 3): abas em tamanho `sm` do DS para as cinco caberem na janela; no celular, `ScrollableTabs` rola. */}
-        <Tabs value={tab} onValueChange={openTab} size="sm">
-          <ScrollableTabs>
-            <TabsList aria-label="Seções do serviço" className={`min-w-max ${tabListNoScroll}`}>
-              <TabsTrigger value="basico">Básico</TabsTrigger>
-              <TabsTrigger value="quem-faz">Quem faz</TabsTrigger>
-              <TabsTrigger value="agenda">Agenda e retorno</TabsTrigger>
-              <TabsTrigger value="pagamento">Pagamento</TabsTrigger>
-              <TabsTrigger value="assistente">O que a assistente explica</TabsTrigger>
-            </TabsList>
-          </ScrollableTabs>
+        <div ref={tabsTopRef} />
+        <Tabs
+          value={tab}
+          onValueChange={(t) => {
+            scrollTop();
+            openTab(t);
+          }}
+          size="sm">
+          
+          {/* CONTRATO NOVO (janela de tamanho único, 23/11/2026): as abas ficam paradas no topo do miolo; só o conteúdo rola. */}
+          <div className="sticky top-0 z-10 bg-white">
+            <ScrollableTabs>
+              <TabsList aria-label="Seções do serviço" className={`min-w-max ${tabListNoScroll}`}>
+                <TabsTrigger value="basico">Básico</TabsTrigger>
+                <TabsTrigger value="quem-faz">Quem faz</TabsTrigger>
+                <TabsTrigger value="agenda">Agenda e retorno</TabsTrigger>
+                <TabsTrigger value="pagamento">Pagamento</TabsTrigger>
+                <TabsTrigger value="assistente">O que a assistente explica</TabsTrigger>
+              </TabsList>
+            </ScrollableTabs>
+          </div>
 
           {/* ───────── A) Básico ───────── */}
           <TabsContent value="basico" className="mt-5">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Input label="Nome do serviço" required value={form.name} maxLength={200} onChange={(e) => set('name', e.target.value)} error={err('name')} />
               <div>
-                <Select label="Categoria" options={categories.map((c) => ({ value: c.id, label: c.name }))} value={form.categoryId} onChange={(v) => set('categoryId', v)} />
-                <div className="mt-2">
-                  <Button size="sm" variant="neutral" onClick={onManageCategories}>
-                    Gerenciar categorias
-                  </Button>
-                </div>
+                {/* G5b: sem "Gerenciar categorias" aqui; categorias ficam em "+ Nova categoria", na barra da aba Serviços. */}
+                {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): primeira linha "Nova categoria". */}
+                <SelectComCadastro
+                  label="Categoria"
+                  options={categories.map((c) => ({ value: c.id, label: c.name }))}
+                  value={form.categoryId}
+                  onChange={(v) => set('categoryId', v)}
+                  createLabel="Nova categoria"
+                  onCreate={() => {
+                    categoriesAtOpen.current = categories.map((c) => c.id);
+                    setNewCategory(true);
+                  }} />
+                
               </div>
-              <div className="sm:col-span-2">
-                <PillGroup label="Tipo de atendimento" size="sm" options={KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))} value={form.kind} onChange={(v) => typeof v === 'string' && set('kind', v as ServiceKind)} />
-                <p className={SECTION_HELP}>{KIND_OPTIONS.find((o) => o.value === form.kind)?.hint} A assistente usa isso para entender pedidos como “{kindExample(form.kind, form.name)}”.</p>
+              <div className="flex flex-col gap-4 sm:col-span-2">
+                <div>
+                  <PillGroup label="Tipo de atendimento" size="sm" options={KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))} value={form.kind} onChange={(v) => typeof v === 'string' && set('kind', v as ServiceKind)} />
+                  <p className={SECTION_HELP}>{KIND_OPTIONS.find((o) => o.value === form.kind)?.hint} A assistente usa isso para entender pedidos como “{kindExample(form.kind, form.name)}”.</p>
+                </div>
+                {/* CONTRATO NOVO (aulas em grupo, G5, 23/11/2026): o tipo "Turma" é o único controle do atendimento em grupo.
+                     Mudar o tipo com turmas ativas não salva (aviso logo abaixo do tipo). */}
+                {blockedByGroupOff &&
+                <NoticeInline tone="warning" role="alert" title={activeTurmas.length === 1 ? 'Este serviço tem 1 turma.' : `Este serviço tem ${activeTurmas.length} turmas.`}>
+                    Arquive as turmas antes de mudar o tipo.
+                  </NoticeInline>
+                }
+                {isTurma &&
+                <>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <p className="mb-1.5 inline-flex items-center gap-1.5 text-sm font-medium text-text-primary">
+                          <label htmlFor="sv-vagas">
+                            Vagas por horário
+                            <span className="ml-0.5 text-[#B91C1C]" aria-hidden="true">
+                              *
+                            </span>
+                          </label>
+                          <InfoTip label="Vagas por horário" content="Quantos clientes cabem em cada horário desta turma." />
+                        </p>
+                        <Input
+                        id="sv-vagas"
+                        required
+                        inputMode="numeric"
+                        value={form.capacity}
+                        onChange={(e) => set('capacity', e.target.value.replace(/\D/g, '').slice(0, 2))}
+                        error={err('capacity')}
+                        helperText="De 2 a 50." />
+                      
+                      </div>
+                    </div>
+                    <div>
+                      <PillGroup label="Tipo de turma" size="sm" options={TURMA_WORD_OPTIONS} value={form.word} onChange={(v) => typeof v === 'string' && set('word', v as TurmaWordId)} />
+                      <p className={SECTION_HELP}>É a palavra que aparece na agenda, na chamada e na ficha do cliente, como em “Cancelar esta aula”. A mensagem para o cliente usa só o nome do serviço.</p>
+                    </div>
+                  </>
+                }
+                {capacityHits.length > 0 &&
+                <DsConflictNotice
+                  title={capacityHits.length === 1 ? '1 turma fica com mais clientes do que vagas' : `${capacityHits.length} turmas ficam com mais clientes do que vagas`}
+                  items={capacityHits.map(({ t, n }) => ({ key: t.id, name: turmaWhen(t), when: `${n} clientes fixos para ${capacity} vagas` }))}
+                  footnote="Ninguém sai da turma: os clientes continuam inscritos. Novos clientes só entram quando houver vaga."
+                  ack={ackCapacity}
+                  onAck={setAckCapacity}
+                  ackLabel="Entendi: salvar com menos vagas" />
+
+                }
               </div>
               <div className="sm:col-span-2">
                 <PillGroup label="Modalidade" size="sm" options={MODALITY_OPTIONS} value={form.modality} onChange={(v) => typeof v === 'string' && set('modality', v as ServiceModality)} />
@@ -545,55 +703,6 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
               <Input label="Duração (minutos)" required inputMode="numeric" value={form.minutes} onChange={(e) => set('minutes', e.target.value.replace(/\D/g, '').slice(0, 3))} error={err('minutes')} helperText="De 5 a 480 minutos. É o tempo que a agenda reserva." />
               <div />
               {changeTab === 'basico' && changeNotice && <div className="sm:col-span-2">{changeNotice}</div>}
-              {/* CONTRATO NOVO (aulas em grupo, 23/11/2026): atendimento em grupo e vagas por horário. */}
-              <div className="flex flex-col gap-4 sm:col-span-2">
-                <Toggle
-                  checked={form.group}
-                  onCheckedChange={(v: boolean) => set('group', v)}
-                  labelPosition="right"
-                  label={<span className="text-sm font-semibold text-text-primary">Atendimento em grupo</span>}
-                  description="Mais de um cliente no mesmo horário, como uma aula ou turma." />
-                
-                {blockedByGroupOff &&
-                <NoticeInline tone="warning" role="alert" title={activeTurmas.length === 1 ? 'Este serviço tem 1 turma.' : `Este serviço tem ${activeTurmas.length} turmas.`}>
-                    Arquive as turmas antes de desligar o atendimento em grupo.
-                  </NoticeInline>
-                }
-                {form.group &&
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <p className="mb-1.5 inline-flex items-center gap-1.5 text-sm font-medium text-text-primary">
-                        <label htmlFor="sv-vagas">
-                          Vagas por horário
-                          <span className="ml-0.5 text-[#B91C1C]" aria-hidden="true">
-                            *
-                          </span>
-                        </label>
-                        <InfoTip label="Vagas por horário" content="Quantos clientes cabem em cada horário desta turma." />
-                      </p>
-                      <Input
-                      id="sv-vagas"
-                      required
-                      inputMode="numeric"
-                      value={form.capacity}
-                      onChange={(e) => set('capacity', e.target.value.replace(/\D/g, '').slice(0, 2))}
-                      error={err('capacity')}
-                      helperText="De 2 a 50." />
-                    
-                    </div>
-                  </div>
-                }
-                {capacityHits.length > 0 &&
-                <DsConflictNotice
-                  title={capacityHits.length === 1 ? '1 turma fica com mais clientes do que vagas' : `${capacityHits.length} turmas ficam com mais clientes do que vagas`}
-                  items={capacityHits.map(({ t, n }) => ({ key: t.id, name: turmaWhen(t), when: `${n} clientes para ${capacity} vagas` }))}
-                  footnote="Ninguém sai da turma: os clientes continuam inscritos. Novos clientes só entram quando houver vaga."
-                  ack={ackCapacity}
-                  onAck={setAckCapacity}
-                  ackLabel="Entendi: salvar com menos vagas" />
-
-                }
-              </div>
               <div className="sm:col-span-2">
                 <PillGroup label="Como mostrar o preço" size="sm" options={PRICE_MODE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))} value={form.priceMode} onChange={(v) => typeof v === 'string' && set('priceMode', v as PriceMode)} />
                 <p className={SECTION_HELP}>{priceModeExample(form.priceMode, form.name, price)}</p>
@@ -611,7 +720,7 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
               onChange={(v) => set('pay', v)}
               service={candidate}
               empresa={empresa}
-              errors={submitted || initialTab === 'pagamento' ? payErrors : {}}
+              errors={submitted || initialTab === 'pagamento' || checkedTabs.includes('pagamento') ? payErrors : {}}
               arrival={initialTab === 'pagamento'}
               onGoEmpresa={(campo) => {
                 if (!onGoDefault) return leaveTo(`/atendente-ia/empresa?campo=${campo}`);
@@ -628,6 +737,12 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
           {/* ───────── B) O que a assistente explica ───────── */}
           <TabsContent value="assistente" className="mt-5">
             <div className="flex flex-col gap-6">
+              {/* CONTRATO NOVO (janela com etapas, 23/11/2026): na criação, o que pode ficar para depois fica dito acima do conteúdo. */}
+              {isCreate && !status.complete &&
+              <NoticeInline tone="warning" title="Falta a descrição para o cliente.">
+                  Enquanto isso, a assistente passa as dúvidas sobre este serviço para a equipe. Dá para adicionar agora e completar depois em Serviços.
+                </NoticeInline>
+              }
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={status.complete ? 'success' : 'warning'} label={knowledgeBadgeLabel(status)} />
                 <p className="inline-flex flex-wrap items-center gap-1.5 text-sm text-text-secondary">
@@ -636,7 +751,7 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
                   status.brackets ?
                   'Troque o que está entre colchetes na descrição.' :
                   'Falta a descrição para o cliente (pelo menos 80 caracteres).'}
-                  {!status.complete && <InfoTip label="Enquanto falta" content="Enquanto isso, a assistente passa as dúvidas sobre este serviço para a equipe." />}
+                  {!status.complete && !isCreate && <InfoTip label="Enquanto falta" content="Enquanto isso, a assistente passa as dúvidas sobre este serviço para a equipe." />}
                 </p>
               </div>
               {status.improve.length > 0 &&
@@ -758,7 +873,16 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
                 </div>
                 {form.k.requiresEvaluation && evaluationOptions.length > 0 &&
                 <div className="mt-3 max-w-sm">
-                    <Select label="Qual avaliação" placeholder="Escolha o serviço de avaliação" options={evaluationOptions.map((s) => ({ value: s.id, label: s.name, description: `${s.durationMin} min` }))} value={form.k.evaluationServiceId ?? undefined} onChange={(v) => setK('evaluationServiceId', v)} />
+                    {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): primeira linha "Cadastrar serviço" (abre já como Avaliação). */}
+                    <SelectComCadastro
+                    label="Qual avaliação"
+                    placeholder="Escolha o serviço de avaliação"
+                    options={evaluationOptions.map((s) => ({ value: s.id, label: s.name, description: `${s.durationMin} min` }))}
+                    value={form.k.evaluationServiceId ?? undefined}
+                    onChange={(v) => setK('evaluationServiceId', v)}
+                    createLabel="Cadastrar serviço"
+                    onCreate={(typed) => setNewEval({ mounted: true, open: true, typed })} />
+                  
                   </div>
                 }
                 {/* W2 (A3-05): aviso próprio, fora da conta de "Completo". Mesmo padrão do aviso "Regras gerais…" desta aba. */}
@@ -769,11 +893,12 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
                   variant="warning"
                   title="Ainda não há serviço do tipo “Avaliação”"
                   actions={
-                  onNewEvaluation ?
-                  <Button size="md" variant="secondary" onClick={() => requestLeave(() => {onClose();onNewEvaluation();})}>
-                          Cadastrar serviço de Avaliação
-                        </Button> :
-                  undefined
+                  // CONTRATO NOVO (seletor com cadastro, 23/11/2026) (lote SC2b): abre "Novo serviço" POR CIMA, já como Avaliação (o mesmo
+                  // `NovoServicoHost` de "Qual avaliação"); ao adicionar, volta a este serviço com a avaliação escolhida.
+                  // Antes fechava este serviço (`onNewEvaluation`, que continua aceita e não é mais chamada daqui).
+                  <Button size="md" variant="secondary" onClick={() => setNewEval({ mounted: true, open: true, typed: '' })}>
+                        Cadastrar serviço de Avaliação
+                      </Button>
                   }>
                   
                     Até você cadastrar, a assistente diz ao cliente que é preciso uma avaliação antes e oferece chamar a equipe.
@@ -1033,6 +1158,12 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
 
                 })}
               </ul>
+              {/* CONTRATO NOVO (janela com etapas, 23/11/2026): cadastrar o profissional sem sair do serviço (mesmo padrão do "Adicionar pergunta"). */}
+              <div className="mt-2">
+                <Button size="md" variant="secondary" leftIcon={<PlusIcon className="h-4 w-4" />} onClick={() => setNewPro(true)}>
+                  Cadastrar profissional
+                </Button>
+              </div>
               {err('pros') && <p className="mt-2 text-sm text-[#B91C1C]">{err('pros')}</p>}
               {changeTab === 'quem-faz' && changeNotice && <div className="mt-3">{changeNotice}</div>}
               {noScheduleMembers.length > 0 &&
@@ -1047,6 +1178,44 @@ export function ServicoModal({ open, onClose, editing, categories, services, mem
         {/* L11: os avisos ficam na aba do campo que os causou (acima). Esta instância só conta os clientes, em qualquer aba. */}
         {open && followChanged && <FollowUpImpact serviceName={editing!.name} ack={ackFollow} onAck={setAckFollow} onCount={countFollow} show={false} />}
       </AppModal>
+
+      {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): a mesma janela do "+ Nova categoria"; a categoria nova volta escolhida. */}
+      <CategoriasModal
+        open={newCategory}
+        onClose={() => setNewCategory(false)}
+        focusNew
+        categories={categories}
+        services={services}
+        onSave={(list) => {
+          setCategories(list);
+          toast({ title: 'Categorias salvas', description: 'A lista de serviços segue a nova ordem.' });
+          const added = list.filter((c) => !categoriesAtOpen.current.includes(c.id));
+          if (added.length) set('categoryId', added[added.length - 1].id);
+        }} />
+      
+
+      {/* CONTRATO NOVO (seletor com cadastro, 23/11/2026): "Cadastrar serviço" de "Qual avaliação"; volta escolhido. */}
+      {newEval.mounted &&
+      <NovoServicoHost
+        open={newEval.open}
+        initialName={newEval.typed}
+        initialKind="avaliacao"
+        onClose={() => {
+          setNewEval((e) => ({ ...e, open: false }));
+          window.setTimeout(() => setNewEval((e) => e.open ? e : { ...e, mounted: false }), 400);
+        }}
+        onCreated={(s) => {
+          if (s.kind === 'avaliacao' && s.active) setK('evaluationServiceId', s.id);
+        }} />
+
+      }
+
+      {/* CONTRATO NOVO (janela com etapas, 23/11/2026): "Novo profissional" por cima; ao adicionar, volta já marcado. */}
+      <NovoProfissionalHost
+        open={newPro}
+        onClose={() => setNewPro(false)}
+        onCreated={(m) => setForm((f) => ({ ...f, pros: f.pros.includes(m.id) ? f.pros : [...f.pros, m.id] }))} />
+      
 
       <ConfirmDialog
         open={askTemplate}

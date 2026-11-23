@@ -180,7 +180,26 @@ export function EquipeTab({ members, services, onOpen, action }: EquipeTabProps)
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className="flex items-center gap-2">
+                        {/* CONTRATO NOVO (janela com etapas, 23/11/2026): ativo sem serviço = "Sem serviços" + "Completar", no
+                           padrão do "Falta WhatsApp" + "Completar"; abre o profissional na aba Serviços. */}
+                        {n === 0 && m.active !== false ?
+                      <span className="flex flex-wrap items-center gap-2">
+                            <StatusBadge status="warning" label="Sem serviços" />
+                            <Button
+                          size="sm"
+                          variant="neutral"
+                          aria-label={`Completar os serviços de ${m.name}`}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpen(m, 'servicos');
+                          }}>
+                          
+                              Completar
+                            </Button>
+                          </span> :
+
+                      <span className="flex items-center gap-2">
                           <span className="text-sm tabular-nums text-text-primary">{n === 0 ? 'Nenhum' : n === 1 ? '1 serviço' : `${n} serviços`}</span>
                           <Button
                           size="sm"
@@ -193,6 +212,7 @@ export function EquipeTab({ members, services, onOpen, action }: EquipeTabProps)
                             Ver
                           </Button>
                         </span>
+                      }
                       </TableCell>
                       <TableCell>
                         <span className="flex flex-col items-start gap-1">
@@ -239,6 +259,8 @@ export function EquipeTab({ members, services, onOpen, action }: EquipeTabProps)
                         <StatusBadge status={t.tone} label={t.label} />
                         <span className="text-xs tabular-nums text-text-secondary">{t.detail}</span>
                       </span>
+                      {/* CONTRATO NOVO (janela com etapas, 23/11/2026): no celular, a etiqueta sem botão, como o "Falta WhatsApp". */}
+                      {n === 0 && m.active !== false && <StatusBadge status="warning" label="Sem serviços" />}
                       <Phone m={m} />
                     </span>
                   </button>

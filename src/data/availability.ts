@@ -300,7 +300,7 @@ export function checkAvailability(data: AgendaSnapshot, req: AvailabilityRequest
   const seenIds = new Set(listed.map((a) => a.id));
   const mine = [...listed, ...(extraBusy?.(req.iso, req.professionalId) ?? []).filter((a) => a.id !== req.ignoreId && !seenIds.has(a.id))];
   const hit = mine.find((a) => overlaps(s, e, toMinutes(a.start), toMinutes(a.end)));
-  if (hit) return fail('appointment', hit.start, hit.end, `${who} já tem ${(hit as {aula?: unknown;}).aula ? `aula de ${hit.clientName}` : hit.clientName} das ${hit.start} às ${hit.end}.`, hit.id);
+  if (hit) return fail('appointment', hit.start, hit.end, `${who} já tem ${(hit as {aula?: {word?: string;};}).aula ? `${(hit as {aula: {word?: string;};}).aula.word || 'turma'} de ${hit.clientName}` : hit.clientName} das ${hit.start} às ${hit.end}.`, hit.id);
 
   const gap = bufferMinutes(member);
   if (gap > 0 && !waived('buffer')) {
